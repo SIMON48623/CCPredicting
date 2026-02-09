@@ -1,0 +1,10 @@
+
+# generated results / potential sensitive outputs
+oof_*.csv
+tab_*.csv
+subgroup_*.csv
+threshold_*.csv
+threshold_*.txt
+tables/*.csv
+tables/*.docx
+figures/*.png
