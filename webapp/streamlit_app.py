@@ -65,6 +65,20 @@ def read_png_if_exists(rel_path: str):
 # Header
 # -------------------------
 st.title("Cervical Lesion Risk Prediction (Tab-MFM Transformer)")
+with st.expander("About / Disclaimer (click to expand)", expanded=True):
+    st.markdown(
+        """
+**Research prototype. Not for direct clinical diagnosis.**  
+This web tool provides risk estimates from a tabular transformer model trained on a single-center retrospective dataset.
+Predictions are intended for research demonstration only and require external validation before any clinical use.
+
+**Inputs** are clinician-recorded variables (e.g., HPV status, cytology grade, colposcopic impression, etc.).  
+**Output** is a calibrated probability and a decision suggestion under the selected thresholding strategy (e.g., Youden / triage).
+
+We do not store patient-identifiable information. Please avoid entering any personal identifiers.
+        """
+    )
+
 st.caption("Research prototype. Not for direct clinical diagnosis. External validation required.")
 
 meta = load_meta()
