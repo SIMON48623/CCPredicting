@@ -256,3 +256,12 @@ with tab_docs:
         "- Threshold modes are for research/triage demonstration.\n"
         "- Not for direct clinical diagnosis."
     )
+import os
+
+st.markdown("---")
+ver_path = os.path.join(os.path.dirname(__file__), "version.txt")
+if os.path.exists(ver_path):
+    with open(ver_path, "r", encoding="utf-8") as f:
+        st.caption(f"Version: {f.read().strip()}")
+else:
+    st.caption("Version: (version.txt not found)")
