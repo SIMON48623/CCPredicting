@@ -15,7 +15,15 @@ PROJ_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
 if PROJ_ROOT not in sys.path:
     sys.path.insert(0, PROJ_ROOT)
 
-from final_model.predict_api import predict_one  # noqa: E402
+PRED_BACKEND_AVAILABLE = False
+predict_one = None
+
+try:
+    from final_model.predict_api import predict_one  # noqa: E402
+    PRED_BACKEND_AVAILABLE = True
+except Exception:
+    PRED_BACKEND_AVAILABLE = False
+    predict_one = None
 
 
 # -------------------------
@@ -29,7 +37,7 @@ st.set_page_config(
 )
 
 # -------------------------
-# CSS
+# CSS (hospital-dashboard style)
 # -------------------------
 st.markdown(
     """
@@ -80,13 +88,8 @@ div[data-testid="stSidebarContent"] { padding-top: 0.6rem; }
   overflow: hidden;
   background: #fff;
 }
-.summary-row {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-}
-.summary-row.row2 {
-  grid-template-columns: repeat(7, 1fr);
-}
+.summary-row { display: grid; grid-template-columns: repeat(8, 1fr); }
+.summary-row.row2 { grid-template-columns: repeat(7, 1fr); }
 .summary-cell {
   padding: 10px 10px 8px 10px;
   border-right: 1px solid rgba(0,0,0,.06);
@@ -98,7 +101,6 @@ div[data-testid="stSidebarContent"] { padding-top: 0.6rem; }
 }
 .summary-row:first-child .summary-cell { border-top: none; }
 .summary-cell:last-child { border-right: none; }
-
 .summary-k {
   font-size: 0.82rem;
   color: rgba(0,0,0,.55);
@@ -114,7 +116,6 @@ div[data-testid="stSidebarContent"] { padding-top: 0.6rem; }
   color: rgba(0,0,0,.90);
   line-height: 1.15;
 }
-
 @media (max-width: 1100px) {
   .summary-row { grid-template-columns: repeat(4, 1fr); }
   .summary-row.row2 { grid-template-columns: repeat(4, 1fr); }
@@ -125,7 +126,7 @@ div[data-testid="stSidebarContent"] { padding-top: 0.6rem; }
 )
 
 # -------------------------
-# Variable dictionary (EN)
+# Variable dictionary (English)
 # -------------------------
 VAR_DICT = {
     "age": {"label": "Age (years)", "desc": "Age at the time of examination."},
@@ -142,7 +143,7 @@ VAR_DICT = {
     "TZ_type": {"label": "Transformation zone (TZ) type", "desc": "1–3 TZ visibility type."},
     "iodine_negative": {"label": "Iodine test negative", "desc": "Schiller iodine staining negative."},
     "atypical_vessels": {"label": "Atypical vessels", "desc": "Presence of atypical vessels."},
-    "pathology_fig": {"label": "Pathology fig (routine variable)", "desc": "Treated as a routine input variable."},
+    "pathology_fig": {"label": "Pathology fig (routine variable)", "desc": "Treated as a routine input variable; independent from label in the UI."},
 }
 
 FEATURE_ORDER = [
@@ -179,7 +180,6 @@ def clinical_message(band: str) -> str:
     return "Lower risk: continue routine screening/follow-up (research prototype)."
 
 def render_input_summary_table(rec: dict):
-    # two rows: 8 + 7 columns
     row1 = ["age", "menopausal_status", "gravidity", "parity", "child_alive", "HPV_overall", "HPV16", "HPV18"]
     row2 = ["HPV_other_hr", "cytology_grade", "colpo_impression", "TZ_type", "iodine_negative", "atypical_vessels", "pathology_fig"]
 
@@ -202,8 +202,6 @@ def render_input_summary_table(rec: dict):
       </div>
     </div>
     """
-
-    # ✅ Force HTML rendering (prevents showing raw <div> as text)
     components.html(html, height=150, scrolling=False)
 
 def make_template_csv() -> bytes:
@@ -219,26 +217,38 @@ def make_template_csv() -> bytes:
     df.to_csv(buf, index=False)
     return buf.getvalue().encode("utf-8")
 
-def render_ig_payload(ig):
-    if ig is None:
-        st.info("IG explanation is not available.")
+def pick_ig_payload(out: dict):
+    # Support common backend keys without exposing backend details.
+    for k in ["ig", "reasons", "ig_reasons", "explanation", "explain"]:
+        if k in out and out[k] not in (None, "", []):
+            return out[k]
+    return None
+
+def render_ig_payload(payload):
+    if payload is None:
+        st.info("IG explanation is not available for this deployment.")
         return
-    if isinstance(ig, dict) and ("positive" in ig or "negative" in ig):
+
+    # Preferred: dict with positive/negative lists
+    if isinstance(payload, dict) and ("positive" in payload or "negative" in payload):
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**Factors increasing risk**")
-            for r in (ig.get("positive") or [])[:12]:
+            for r in (payload.get("positive") or [])[:12]:
                 st.write(f"- {r}")
         with c2:
             st.markdown("**Factors decreasing risk**")
-            for r in (ig.get("negative") or [])[:12]:
+            for r in (payload.get("negative") or [])[:12]:
                 st.write(f"- {r}")
         return
-    if isinstance(ig, list):
-        for r in ig[:12]:
+
+    # List[str]
+    if isinstance(payload, list):
+        for r in payload[:12]:
             st.write(f"- {r}")
         return
-    st.write(str(ig))
+
+    st.write(str(payload))
 
 
 # -------------------------
@@ -337,48 +347,57 @@ with tab_single:
         st.markdown('<div class="card"><div class="card-title">Risk assessment</div>', unsafe_allow_html=True)
 
         if run_btn:
-            with st.spinner("Computing risk..."):
-                try:
-                    t0 = time.time()
-                    out = predict_one(record, mode=mode)
-                    dt_ms = (time.time() - t0) * 1000
+            if not PRED_BACKEND_AVAILABLE:
+                st.error("Prediction backend is unavailable. Please confirm the deployment environment is configured for inference.")
+            else:
+                with st.spinner("Computing risk..."):
+                    try:
+                        t0 = time.time()
+                        out = predict_one(record, mode=mode)
+                        dt_ms = (time.time() - t0) * 1000
 
-                    st.session_state["last_pred"] = out
-                    st.session_state["last_record"] = dict(record)
+                        st.session_state["last_pred"] = out
+                        st.session_state["last_record"] = dict(record)
 
-                    prob = safe_float(out.get("prob"), 0.0)
-                    band = risk_band(prob)
+                        prob = safe_float(out.get("prob"), None)
+                        if prob is None:
+                            prob = safe_float(out.get("risk"), 0.0)
 
-                    st.markdown(
-                        f"<div class='risk-banner {band_class(band)}'>"
-                        f"<div class='risk-label'>Risk band: {band}</div>"
-                        f"<div style='color:rgba(0,0,0,.62)'>Calibrated probability: <b>{prob:.3f}</b></div>"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
-                    st.write(clinical_message(band))
-                    st.markdown("<div class='hr-soft'></div>", unsafe_allow_html=True)
+                        band = risk_band(prob)
 
-                    m1, m2, m3 = st.columns(3)
-                    m1.metric("Probability", f"{prob:.3f}")
-                    m2.metric("Mode", str(out.get("decision_mode", mode)))
-                    thr = out.get("threshold", None)
-                    m3.metric("Threshold", f"{float(thr):.3f}" if thr is not None else "—")
+                        st.markdown(
+                            f"<div class='risk-banner {band_class(band)}'>"
+                            f"<div class='risk-label'>Risk band: {band}</div>"
+                            f"<div style='color:rgba(0,0,0,.62)'>Calibrated probability: <b>{prob:.3f}</b></div>"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+                        st.write(clinical_message(band))
+                        st.markdown("<div class='hr-soft'></div>", unsafe_allow_html=True)
 
-                    lab = out.get("label", None)
-                    if lab is not None:
-                        st.markdown(f"**Decision:** {str(lab).upper()}")
+                        m1, m2, m3 = st.columns(3)
+                        m1.metric("Probability", f"{prob:.3f}")
+                        m2.metric("Mode", str(out.get("decision_mode", out.get("mode", mode))))
+                        thr = out.get("threshold", None)
+                        m3.metric("Threshold", f"{float(thr):.3f}" if thr is not None else "—")
 
-                    st.caption(f"Latency: {dt_ms:.0f} ms")
+                        lab = out.get("label", out.get("decision", None))
+                        if lab is not None:
+                            st.markdown(f"**Decision:** {str(lab).upper()}")
 
-                except Exception:
-                    st.error("Unable to compute risk. Please verify model availability and inputs.")
+                        st.caption(f"Latency: {dt_ms:.0f} ms")
+
+                    except Exception:
+                        st.error("Unable to compute risk in this deployment.")
+
         else:
             if st.session_state["last_pred"] is None:
                 st.info("Enter inputs in the sidebar and click Run prediction.")
             else:
                 out = st.session_state["last_pred"]
-                prob = safe_float(out.get("prob"), 0.0)
+                prob = safe_float(out.get("prob"), None)
+                if prob is None:
+                    prob = safe_float(out.get("risk"), 0.0)
                 band = risk_band(prob)
                 st.markdown(
                     f"<div class='risk-banner {band_class(band)}'>"
@@ -391,6 +410,7 @@ with tab_single:
 
         st.markdown("</div>", unsafe_allow_html=True)
 
+    # Explainability (IG only)
     st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
     st.markdown('<div class="card"><div class="card-title">Explainability</div>', unsafe_allow_html=True)
     st.subheader("Integrated gradients (single-case)")
@@ -398,7 +418,8 @@ with tab_single:
     if st.session_state["last_pred"] is None:
         st.info("Run prediction to view IG explanation for the current input case.")
     else:
-        render_ig_payload(st.session_state["last_pred"].get("ig", None))
+        payload = pick_ig_payload(st.session_state["last_pred"])
+        render_ig_payload(payload)
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -409,6 +430,7 @@ with tab_single:
 with tab_batch:
     st.markdown('<div class="card"><div class="card-title">Batch prediction</div>', unsafe_allow_html=True)
     st.write("Upload a CSV containing the required columns. Predictions are computed row-by-row.")
+
     st.download_button(
         "Download CSV template",
         data=make_template_csv(),
@@ -426,29 +448,47 @@ with tab_batch:
         else:
             st.success(f"Loaded {len(df)} rows.")
             run_batch = st.button("Run batch prediction", type="primary")
-            if run_batch:
-                out_rows = []
-                prog = st.progress(0)
-                n = len(df)
-                for i, row in df.iterrows():
-                    rec = {k: (0 if pd.isna(row[k]) else int(row[k])) for k in FEATURE_ORDER}
-                    try:
-                        pred = predict_one(rec, mode=mode)
-                        p = safe_float(pred.get("prob"), None)
-                        out_rows.append({"row": i, "probability": p})
-                    except Exception:
-                        out_rows.append({"row": i, "probability": None})
-                    prog.progress(int((i + 1) / max(n, 1) * 100))
 
-                out_df = pd.DataFrame(out_rows)
-                st.dataframe(out_df, use_container_width=True, hide_index=True)
-                st.download_button(
-                    "Download results CSV",
-                    data=out_df.to_csv(index=False).encode("utf-8"),
-                    file_name="batch_predictions.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                )
+            if run_batch:
+                if not PRED_BACKEND_AVAILABLE:
+                    st.error("Batch prediction is unavailable in this deployment.")
+                else:
+                    out_rows = []
+                    prog = st.progress(0)
+                    n = len(df)
+
+                    for i, row in df.iterrows():
+                        rec = {}
+                        for k in FEATURE_ORDER:
+                            val = row[k]
+                            if pd.isna(val):
+                                rec[k] = 0
+                            else:
+                                try:
+                                    rec[k] = int(val)
+                                except Exception:
+                                    rec[k] = val
+                        try:
+                            pred = predict_one(rec, mode=mode)
+                            p = safe_float(pred.get("prob"), None)
+                            if p is None:
+                                p = safe_float(pred.get("risk"), None)
+                            out_rows.append({"row": i, "probability": p, "risk_band": risk_band(float(p)) if p is not None else "ERROR"})
+                        except Exception:
+                            out_rows.append({"row": i, "probability": None, "risk_band": "ERROR"})
+
+                        prog.progress(int((i + 1) / max(n, 1) * 100))
+
+                    out_df = pd.DataFrame(out_rows)
+                    st.dataframe(out_df, use_container_width=True, hide_index=True)
+
+                    st.download_button(
+                        "Download results CSV",
+                        data=out_df.to_csv(index=False).encode("utf-8"),
+                        file_name="batch_predictions.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -460,10 +500,6 @@ with tab_dict:
     st.markdown('<div class="card"><div class="card-title">Data dictionary</div>', unsafe_allow_html=True)
     rows = []
     for k in FEATURE_ORDER:
-        rows.append({
-            "Variable": k,
-            "Label": VAR_DICT[k]["label"],
-            "Description": VAR_DICT[k]["desc"],
-        })
+        rows.append({"Variable": k, "Label": VAR_DICT[k]["label"], "Description": VAR_DICT[k]["desc"]})
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     st.markdown("</div>", unsafe_allow_html=True)
