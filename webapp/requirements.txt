@@ -1,3 +1,5 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.2.2
 streamlit
 pandas
 numpy
@@ -7,5 +9,4 @@ xgboost
 shap
 joblib
 scipy
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.2.2
+
