@@ -2,11 +2,29 @@
 # Performance asset discovery + plotting (FULL REPLACEMENT BLOCK)
 # Replace everything from "# Performance asset discovery" to EOF with this block.
 # =========================
+import os
+import sys
+import time
+import json
+import io
 from pathlib import Path
+
+import streamlit as st
+import pandas as pd
 
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, auc, precision_recall_curve, average_precision_score
-import streamlit as st
+
+# =========================
+# Backend import (never displayed)
+# =========================
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJ_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
+if PROJ_ROOT not in sys.path:
+    sys.path.insert(0, PROJ_ROOT)
+
+from final_model.predict_api import predict_one
+
 
 def find_first_existing(paths):
     for p in paths:
