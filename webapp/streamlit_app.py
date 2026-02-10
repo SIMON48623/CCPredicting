@@ -6,23 +6,22 @@ import io
 from pathlib import Path
 
 import streamlit as st
-import pandas as pd
 import streamlit.components.v1 as components
+import pandas as pd
 
-# =========================
-# Backend import (never displayed)
-# =========================
+# -------------------------
+# Paths & imports
+# -------------------------
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJ_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
 if PROJ_ROOT not in sys.path:
     sys.path.insert(0, PROJ_ROOT)
 
-from final_model.predict_api import predict_one  # noqa: E402
+from final_model.predict_api import predict_one
 
-
-# =========================
-# Page config
-# =========================
+# -------------------------
+# Page
+# -------------------------
 st.set_page_config(
     page_title="Clinical Risk Dashboard",
     page_icon="",
@@ -30,18 +29,15 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# =========================
-# Dashboard CSS (Hospital style)
-# =========================
+# -------------------------
+# Hospital-dashboard CSS
+# -------------------------
 st.markdown(
     """
 <style>
 .block-container { padding-top: 1.1rem; padding-bottom: 2.0rem; max-width: 1320px; }
 section[data-testid="stSidebar"] { border-right: 1px solid rgba(0,0,0,0.06); }
 div[data-testid="stSidebarContent"] { padding-top: 0.6rem; }
-
-h1, h2, h3 { letter-spacing: -0.02em; }
-.small-muted { color: rgba(0,0,0,0.60); font-size: 0.92rem; }
 
 .header {
   border-radius: 16px;
@@ -77,13 +73,13 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   padding: .60rem 1.00rem !important;
   font-weight: 700 !important;
 }
-button[data-baseweb="tab"] { font-weight: 680; }
 
-/* ---- Table-like input summary grid ---- */
+/* ---- table-like input summary ---- */
 .summary-grid {
   border: 1px solid rgba(0,0,0,.08);
   border-radius: 14px;
   overflow: hidden;
+  background: #fff;
 }
 .summary-row {
   display: grid;
@@ -120,7 +116,6 @@ button[data-baseweb="tab"] { font-weight: 680; }
   line-height: 1.15;
 }
 
-/* make wrap look cleaner on small screens */
 @media (max-width: 1100px) {
   .summary-row { grid-template-columns: repeat(4, 1fr); }
   .summary-row.row2 { grid-template-columns: repeat(4, 1fr); }
@@ -130,41 +125,14 @@ button[data-baseweb="tab"] { font-weight: 680; }
     unsafe_allow_html=True,
 )
 
-# =========================
-# Variable dictionary (English tooltips + display label mapping)
-# =========================
-VAR_DICT = {
-    "age": {"label": "Age (years)", "help": "Age at the time of examination."},
-    "menopausal_status": {"label": "Menopausal status", "help": "0 = Premenopausal; 1 = Postmenopausal."},
-    "gravidity": {"label": "Gravidity", "help": "Number of pregnancies (including miscarriage/ectopic)."},
-    "parity": {"label": "Parity", "help": "Number of deliveries (≥28 weeks)."},
-    "child_alive": {"label": "Any living child", "help": "1 = has at least one living child; 0 = none."},
-    "HPV_overall": {"label": "High-risk HPV (overall)", "help": "Overall high-risk HPV status."},
-    "HPV16": {"label": "HPV16 positive", "help": "HPV16 infection status."},
-    "HPV18": {"label": "HPV18 positive", "help": "HPV18 infection status."},
-    "HPV_other_hr": {"label": "Other high-risk HPV", "help": "Other high-risk HPV types."},
-    "cytology_grade": {"label": "Cytology grade", "help": "0–5 ordinal grade."},
-    "colpo_impression": {"label": "Colposcopy impression", "help": "0–4 ordinal impression."},
-    "TZ_type": {"label": "Transformation zone (TZ) type", "help": "1–3 TZ visibility type."},
-    "iodine_negative": {"label": "Iodine test negative", "help": "Schiller iodine staining negative."},
-    "atypical_vessels": {"label": "Atypical vessels", "help": "Presence of atypical vessels."},
-    "pathology_fig": {"label": "Pathology fig (routine variable)", "help": "Enter as recorded in the dataset."},
-}
-
-FEATURE_ORDER = [
-    "age", "menopausal_status", "gravidity", "parity",
-    "child_alive", "HPV_overall", "HPV16", "HPV18",
-    "HPV_other_hr", "cytology_grade", "colpo_impression", "TZ_type",
-    "iodine_negative", "atypical_vessels", "pathology_fig",
-]
-
-
+# -------------------------
+# Helpers
+# -------------------------
 def safe_float(x, default=None):
     try:
         return float(x)
     except Exception:
         return default
-
 
 def risk_band(prob: float) -> str:
     if prob < 0.10:
@@ -173,10 +141,8 @@ def risk_band(prob: float) -> str:
         return "Intermediate"
     return "High"
 
-
 def band_class(band: str) -> str:
     return {"Low": "risk-low", "Intermediate": "risk-mid", "High": "risk-high"}.get(band, "risk-mid")
-
 
 def clinical_message(band: str) -> str:
     if band == "High":
@@ -184,32 +150,6 @@ def clinical_message(band: str) -> str:
     if band == "Intermediate":
         return "Intermediate risk: consider closer follow-up and triage (research prototype)."
     return "Lower risk: continue routine screening/follow-up (research prototype)."
-
-
-def make_template_csv() -> bytes:
-    demo = {k: 0 for k in FEATURE_ORDER}
-    demo.update({
-        "age": 45,
-        "menopausal_status": 0,
-        "gravidity": 2,
-        "parity": 1,
-        "child_alive": 0,
-        "HPV_overall": 0,
-        "HPV16": 0,
-        "HPV18": 0,
-        "HPV_other_hr": 0,
-        "cytology_grade": 3,
-        "colpo_impression": 2,
-        "TZ_type": 2,
-        "iodine_negative": 0,
-        "atypical_vessels": 0,
-        "pathology_fig": 2,
-    })
-    df = pd.DataFrame([demo])
-    buf = io.StringIO()
-    df.to_csv(buf, index=False)
-    return buf.getvalue().encode("utf-8")
-
 
 def render_input_summary_table(rec: dict):
     row1 = ["age", "menopausal_status", "gravidity", "parity", "child_alive", "HPV_overall", "HPV16", "HPV18"]
@@ -234,57 +174,45 @@ def render_input_summary_table(rec: dict):
       </div>
     </div>
     """
-
-    #  components.html will always render HTML (not print it as text)
+    # ✅ This prevents HTML being shown as raw text
     components.html(html, height=150, scrolling=False)
 
+def make_template_csv() -> bytes:
+    demo = {
+        "age": 45, "menopausal_status": 0, "gravidity": 2, "parity": 1, "child_alive": 0,
+        "HPV_overall": 0, "HPV16": 0, "HPV18": 0, "HPV_other_hr": 0,
+        "cytology_grade": 3, "colpo_impression": 2, "TZ_type": 2,
+        "iodine_negative": 0, "atypical_vessels": 0, "pathology_fig": 2
+    }
+    df = pd.DataFrame([demo])
+    buf = io.StringIO()
+    df.to_csv(buf, index=False)
+    return buf.getvalue().encode("utf-8")
 
-
-def render_ig_only(reasons):
-    """
-    Show IG explanation for the current case.
-    reasons can be:
-      - list[str]
-      - dict with keys like positive/negative or top_features
-      - str
-    """
-    if reasons is None:
-        st.info("No IG explanation was returned by the model.")
+def render_ig_payload(ig):
+    if ig is None:
+        st.info("IG explanation is not available.")
         return
-
-    # list of strings
-    if isinstance(reasons, list):
-        for r in reasons[:12]:
+    if isinstance(ig, dict) and ("positive" in ig or "negative" in ig):
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**Factors increasing risk**")
+            for r in (ig.get("positive") or [])[:12]:
+                st.write(f"- {r}")
+        with c2:
+            st.markdown("**Factors decreasing risk**")
+            for r in (ig.get("negative") or [])[:12]:
+                st.write(f"- {r}")
+        return
+    if isinstance(ig, list):
+        for r in ig[:12]:
             st.write(f"- {r}")
         return
+    st.write(str(ig))
 
-    # dict form
-    if isinstance(reasons, dict):
-        # common pattern: {"positive":[...], "negative":[...]}
-        if "positive" in reasons or "negative" in reasons:
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("**Factors increasing risk**")
-                for r in (reasons.get("positive") or [])[:10]:
-                    st.write(f"- {r}")
-            with c2:
-                st.markdown("**Factors decreasing risk**")
-                for r in (reasons.get("negative") or [])[:10]:
-                    st.write(f"- {r}")
-            return
-
-        # fallback: show key-value pairs
-        for k, v in list(reasons.items())[:12]:
-            st.write(f"- {k}: {v}")
-        return
-
-    # fallback to string
-    st.write(str(reasons))
-
-
-# =========================
+# -------------------------
 # Header
-# =========================
+# -------------------------
 st.markdown(
     """
 <div class="header">
@@ -295,51 +223,46 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-tab_single, tab_batch, tab_dictionary = st.tabs(["Single-case", "Batch", "Data Dictionary"])
+tab_single, tab_batch = st.tabs(["Single-case", "Batch"])
 
-# =========================
+# -------------------------
 # Sidebar inputs
-# =========================
+# -------------------------
 with st.sidebar:
     st.subheader("Patient inputs")
 
-    age = st.number_input(VAR_DICT["age"]["label"], min_value=10, max_value=100, value=45, step=1, help=VAR_DICT["age"]["help"])
-
-    menopausal_status = st.selectbox(
-        VAR_DICT["menopausal_status"]["label"],
-        options=[0, 1],
-        format_func=lambda x: "0 = Premenopausal" if x == 0 else "1 = Postmenopausal",
-        help=VAR_DICT["menopausal_status"]["help"],
-    )
-
-    gravidity = st.number_input(VAR_DICT["gravidity"]["label"], min_value=0, max_value=30, value=2, step=1, help=VAR_DICT["gravidity"]["help"])
-    parity = st.number_input(VAR_DICT["parity"]["label"], min_value=0, max_value=20, value=1, step=1, help=VAR_DICT["parity"]["help"])
-
-    child_alive = st.selectbox(
-        VAR_DICT["child_alive"]["label"],
-        options=[0, 1],
-        format_func=lambda x: "0 = No" if x == 0 else "1 = Yes",
-        help=VAR_DICT["child_alive"]["help"],
-    )
+    age = st.number_input("Age (years)", min_value=10, max_value=100, value=45, step=1)
+    menopausal_status = st.selectbox("Menopausal status", options=[0, 1],
+                                     format_func=lambda x: "0 = Premenopausal" if x == 0 else "1 = Postmenopausal")
+    gravidity = st.number_input("Gravidity", min_value=0, max_value=30, value=2, step=1)
+    parity = st.number_input("Parity", min_value=0, max_value=20, value=1, step=1)
+    child_alive = st.selectbox("Any living child", options=[0, 1],
+                               format_func=lambda x: "0 = No" if x == 0 else "1 = Yes")
 
     st.divider()
     st.subheader("HPV status")
-    HPV_overall = st.selectbox(VAR_DICT["HPV_overall"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=VAR_DICT["HPV_overall"]["help"])
-    HPV16 = st.selectbox(VAR_DICT["HPV16"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=VAR_DICT["HPV16"]["help"])
-    HPV18 = st.selectbox(VAR_DICT["HPV18"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=VAR_DICT["HPV18"]["help"])
-    HPV_other_hr = st.selectbox(VAR_DICT["HPV_other_hr"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=VAR_DICT["HPV_other_hr"]["help"])
+    HPV_overall = st.selectbox("High-risk HPV (overall)", [0, 1],
+                               format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive")
+    HPV16 = st.selectbox("HPV16 positive", [0, 1],
+                         format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive")
+    HPV18 = st.selectbox("HPV18 positive", [0, 1],
+                         format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive")
+    HPV_other_hr = st.selectbox("Other high-risk HPV", [0, 1],
+                                format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive")
 
     st.divider()
     st.subheader("Cytology and colposcopy")
-    cytology_grade = st.number_input(VAR_DICT["cytology_grade"]["label"], min_value=0, max_value=5, value=3, step=1, help=VAR_DICT["cytology_grade"]["help"])
-    colpo_impression = st.number_input(VAR_DICT["colpo_impression"]["label"], min_value=0, max_value=4, value=2, step=1, help=VAR_DICT["colpo_impression"]["help"])
-    TZ_type = st.number_input(VAR_DICT["TZ_type"]["label"], min_value=1, max_value=3, value=2, step=1, help=VAR_DICT["TZ_type"]["help"])
-    iodine_negative = st.selectbox(VAR_DICT["iodine_negative"]["label"], [0, 1], format_func=lambda x: "0 = No" if x == 0 else "1 = Yes", help=VAR_DICT["iodine_negative"]["help"])
-    atypical_vessels = st.selectbox(VAR_DICT["atypical_vessels"]["label"], [0, 1], format_func=lambda x: "0 = No" if x == 0 else "1 = Yes", help=VAR_DICT["atypical_vessels"]["help"])
+    cytology_grade = st.number_input("Cytology grade (0–5)", min_value=0, max_value=5, value=3, step=1)
+    colpo_impression = st.number_input("Colposcopy impression (0–4)", min_value=0, max_value=4, value=2, step=1)
+    TZ_type = st.number_input("TZ type (1–3)", min_value=1, max_value=3, value=2, step=1)
+    iodine_negative = st.selectbox("Iodine test negative", [0, 1],
+                                   format_func=lambda x: "0 = No" if x == 0 else "1 = Yes")
+    atypical_vessels = st.selectbox("Atypical vessels", [0, 1],
+                                    format_func=lambda x: "0 = No" if x == 0 else "1 = Yes")
 
     st.divider()
     st.subheader("Other")
-    pathology_fig = st.number_input(VAR_DICT["pathology_fig"]["label"], min_value=0, max_value=10, value=2, step=1, help=VAR_DICT["pathology_fig"]["help"])
+    pathology_fig = st.number_input("Pathology fig (routine variable)", min_value=0, max_value=10, value=2, step=1)
 
     st.divider()
     st.subheader("Decision mode")
@@ -347,10 +270,9 @@ with st.sidebar:
 
     run_btn = st.button("Run prediction", type="primary", use_container_width=True)
 
-
-# =========================
+# -------------------------
 # Single-case
-# =========================
+# -------------------------
 with tab_single:
     record = {
         "age": int(age),
@@ -370,10 +292,9 @@ with tab_single:
         "pathology_fig": int(pathology_fig),
     }
 
-    # keep prediction result in session_state so IG follows Run prediction
     if "last_pred" not in st.session_state:
         st.session_state["last_pred"] = None
-        st.session_state["last_pred_record"] = None
+        st.session_state["last_record"] = None
 
     left, right = st.columns([1.15, 0.85], gap="large")
 
@@ -393,22 +314,15 @@ with tab_single:
                     dt_ms = (time.time() - t0) * 1000
 
                     st.session_state["last_pred"] = out
-                    st.session_state["last_pred_record"] = dict(record)
+                    st.session_state["last_record"] = dict(record)
 
-                    prob = safe_float(out.get("prob"), None)
-                    if prob is None:
-                        prob = safe_float(out.get("risk"), 0.0)
-
-                    decision = out.get("decision", None)
-                    thr = safe_float(out.get("threshold"), None)
-                    mode_out = out.get("mode", mode)
-
+                    prob = safe_float(out.get("prob"), 0.0)
                     band = risk_band(prob)
 
                     st.markdown(
                         f"<div class='risk-banner {band_class(band)}'>"
                         f"<div class='risk-label'>Risk band: {band}</div>"
-                        f"<div class='small-muted'>Calibrated probability: <b>{prob:.3f}</b></div>"
+                        f"<div style='color:rgba(0,0,0,.62)'>Calibrated probability: <b>{prob:.3f}</b></div>"
                         f"</div>",
                         unsafe_allow_html=True,
                     )
@@ -417,31 +331,29 @@ with tab_single:
 
                     m1, m2, m3 = st.columns(3)
                     m1.metric("Probability", f"{prob:.3f}")
-                    m2.metric("Mode", str(mode_out))
-                    m3.metric("Threshold", f"{thr:.3f}" if thr is not None else "—")
+                    m2.metric("Mode", str(out.get("decision_mode", mode)))
+                    thr = out.get("threshold", None)
+                    m3.metric("Threshold", f"{float(thr):.3f}" if thr is not None else "—")
 
-                    if decision is not None:
-                        st.markdown(f"**Decision:** {decision}")
+                    lab = out.get("label", None)
+                    if lab is not None:
+                        st.markdown(f"**Decision:** {str(lab).upper()}")
 
                     st.caption(f"Latency: {dt_ms:.0f} ms")
 
                 except Exception:
                     st.error("Unable to compute risk. Please verify model availability and inputs.")
         else:
-            # show last result if exists
             if st.session_state["last_pred"] is None:
                 st.info("Enter inputs in the sidebar and click Run prediction.")
             else:
                 out = st.session_state["last_pred"]
-                prob = safe_float(out.get("prob"), None)
-                if prob is None:
-                    prob = safe_float(out.get("risk"), 0.0)
+                prob = safe_float(out.get("prob"), 0.0)
                 band = risk_band(prob)
-
                 st.markdown(
                     f"<div class='risk-banner {band_class(band)}'>"
                     f"<div class='risk-label'>Risk band: {band}</div>"
-                    f"<div class='small-muted'>Calibrated probability: <b>{prob:.3f}</b></div>"
+                    f"<div style='color:rgba(0,0,0,.62)'>Calibrated probability: <b>{prob:.3f}</b></div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -449,7 +361,7 @@ with tab_single:
 
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # IG section (ONLY current input, follows Run prediction)
+    # ---- Explainability: IG only, follows Run prediction ----
     st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
     st.markdown('<div class="card"><div class="card-title">Explainability</div>', unsafe_allow_html=True)
     st.subheader("Integrated gradients (single-case)")
@@ -457,21 +369,17 @@ with tab_single:
     if st.session_state["last_pred"] is None:
         st.info("Run prediction to view IG explanation for the current input case.")
     else:
-        # Ensure IG shown corresponds to the latest Run prediction
-        out = st.session_state["last_pred"]
-        reasons = out.get("reasons", None)
-        render_ig_only(reasons)
+        ig = st.session_state["last_pred"].get("ig", None)
+        render_ig_payload(ig)
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-
-# =========================
+# -------------------------
 # Batch
-# =========================
+# -------------------------
 with tab_batch:
     st.markdown('<div class="card"><div class="card-title">Batch prediction</div>', unsafe_allow_html=True)
     st.write("Upload a CSV containing the required columns. Predictions are computed row-by-row.")
-
     st.download_button(
         "Download CSV template",
         data=make_template_csv(),
@@ -481,51 +389,36 @@ with tab_batch:
     )
 
     uploaded = st.file_uploader("Upload CSV", type=["csv"])
-
     if uploaded is not None:
         df = pd.read_csv(uploaded)
-        missing = [c for c in FEATURE_ORDER if c not in df.columns]
+        required = [
+            "age","menopausal_status","gravidity","parity","child_alive",
+            "HPV_overall","HPV16","HPV18","HPV_other_hr",
+            "cytology_grade","colpo_impression","TZ_type",
+            "iodine_negative","atypical_vessels","pathology_fig"
+        ]
+        missing = [c for c in required if c not in df.columns]
         if missing:
             st.error(f"Missing required columns: {missing}")
         else:
             st.success(f"Loaded {len(df)} rows.")
             run_batch = st.button("Run batch prediction", type="primary")
-
             if run_batch:
                 out_rows = []
                 prog = st.progress(0)
                 n = len(df)
-
                 for i, row in df.iterrows():
-                    rec = {}
-                    for k in FEATURE_ORDER:
-                        val = row[k]
-                        if pd.isna(val):
-                            rec[k] = 0
-                        else:
-                            try:
-                                rec[k] = int(val)
-                            except Exception:
-                                rec[k] = val
-
+                    rec = {k: (0 if pd.isna(row[k]) else int(row[k])) for k in required}
                     try:
                         pred = predict_one(rec, mode=mode)
                         p = safe_float(pred.get("prob"), None)
-                        if p is None:
-                            p = safe_float(pred.get("risk"), None)
-                        out_rows.append({
-                            "row": i,
-                            "probability": p,
-                            "risk_band": risk_band(float(p)) if p is not None else "ERROR"
-                        })
+                        out_rows.append({"row": i, "probability": p})
                     except Exception:
-                        out_rows.append({"row": i, "probability": None, "risk_band": "ERROR"})
-
+                        out_rows.append({"row": i, "probability": None})
                     prog.progress(int((i + 1) / max(n, 1) * 100))
 
                 out_df = pd.DataFrame(out_rows)
                 st.dataframe(out_df, use_container_width=True, hide_index=True)
-
                 st.download_button(
                     "Download results CSV",
                     data=out_df.to_csv(index=False).encode("utf-8"),
@@ -534,20 +427,4 @@ with tab_batch:
                     use_container_width=True,
                 )
 
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-# =========================
-# Data Dictionary
-# =========================
-with tab_dictionary:
-    st.markdown('<div class="card"><div class="card-title">Data dictionary</div>', unsafe_allow_html=True)
-    rows = []
-    for k in FEATURE_ORDER:
-        rows.append({
-            "Variable": k,
-            "Label": VAR_DICT[k]["label"],
-            "Description": VAR_DICT[k]["help"],
-        })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     st.markdown("</div>", unsafe_allow_html=True)
