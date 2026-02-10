@@ -8,3 +8,24 @@ threshold_*.txt
 tables/*.csv
 tables/*.docx
 figures/*.png
+# === PRIVATE / patient-level data ===
+PRIVATE_DO_NOT_UPLOAD/
+*.xlsx
+*.xls
+
+# patient-level predictions / outputs
+oof*.csv
+*oof*.csv
+*patient*.csv
+*demo*.csv
+ig_one_demo*.csv
+
+# === python cache ===
+__pycache__/
+*.pyc
+
+# === OS / IDE ===
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
