@@ -8,11 +8,6 @@ from pathlib import Path
 import streamlit as st
 import pandas as pd
 
-# Performance plots (OOF -> ROC/PR)
-import matplotlib.pyplot as plt
-from sklearn.metrics import roc_curve, auc, precision_recall_curve, average_precision_score
-
-
 # =========================
 # Backend import (never displayed)
 # =========================
@@ -35,7 +30,7 @@ st.set_page_config(
 )
 
 # =========================
-# Hospital-dashboard CSS
+# Dashboard CSS (Hospital style)
 # =========================
 st.markdown(
     """
@@ -76,148 +71,91 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .risk-high { background: rgba(239,68,68,.12); }
 .risk-label { font-weight: 840; font-size: 1.05rem; }
 
-.kv-label { font-size: .82rem; color: rgba(0,0,0,.55); line-height: 1.1; }
-.kv-value { font-size: 1.02rem; font-weight: 720; margin-top: .1rem; }
-
 .stButton>button {
   border-radius: 12px !important;
   padding: .60rem 1.00rem !important;
   font-weight: 700 !important;
 }
 button[data-baseweb="tab"] { font-weight: 680; }
+
+/* ---- Table-like input summary grid ---- */
+.summary-grid {
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.summary-row {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+}
+.summary-row.row2 {
+  grid-template-columns: repeat(7, 1fr);
+}
+.summary-cell {
+  padding: 10px 10px 8px 10px;
+  border-right: 1px solid rgba(0,0,0,.06);
+  border-top: 1px solid rgba(0,0,0,.06);
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.summary-row:first-child .summary-cell { border-top: none; }
+.summary-cell:last-child { border-right: none; }
+
+.summary-k {
+  font-size: 0.82rem;
+  color: rgba(0,0,0,.55);
+  line-height: 1.1;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.summary-v {
+  font-size: 1.05rem;
+  font-weight: 760;
+  color: rgba(0,0,0,.90);
+  line-height: 1.15;
+}
+
+/* make wrap look cleaner on small screens */
+@media (max-width: 1100px) {
+  .summary-row { grid-template-columns: repeat(4, 1fr); }
+  .summary-row.row2 { grid-template-columns: repeat(4, 1fr); }
+}
 </style>
 """,
     unsafe_allow_html=True,
 )
 
 # =========================
-# Variable dictionary (English tooltips)
+# Variable dictionary (English tooltips + display label mapping)
 # =========================
 VAR_DICT = {
-    "age": {
-        "label": "Age (years)",
-        "type": "Integer",
-        "how": "Age at the time of examination.",
-        "meaning": "Older age is generally associated with higher risk.",
-        "values": "10–100 (UI constraint)",
-    },
-    "menopausal_status": {
-        "label": "Menopausal status",
-        "type": "Binary (0/1)",
-        "how": "0 = Premenopausal; 1 = Postmenopausal.",
-        "meaning": "May influence TZ visibility and clinical interpretation.",
-        "values": "0 or 1",
-    },
-    "gravidity": {
-        "label": "Gravidity",
-        "type": "Integer",
-        "how": "Number of pregnancies (including miscarriage/ectopic).",
-        "meaning": "Reproductive history descriptor.",
-        "values": "0+",
-    },
-    "parity": {
-        "label": "Parity",
-        "type": "Integer",
-        "how": "Number of deliveries (≥28 weeks, including stillbirth).",
-        "meaning": "Reproductive history descriptor.",
-        "values": "0+",
-    },
-    "child_alive": {
-        "label": "Any living child",
-        "type": "Binary (0/1)",
-        "how": "1 = has at least one living child; 0 = none.",
-        "meaning": "Reproductive outcome descriptor.",
-        "values": "0 or 1",
-    },
-    "HPV_overall": {
-        "label": "High-risk HPV (overall)",
-        "type": "Binary (0/1)",
-        "how": "Overall high-risk HPV status.",
-        "meaning": "Core clinical predictor.",
-        "values": "0 or 1",
-    },
-    "HPV16": {
-        "label": "HPV16 positive",
-        "type": "Binary (0/1)",
-        "how": "HPV16 infection status.",
-        "meaning": "Associated with higher CIN3+ risk.",
-        "values": "0 or 1",
-    },
-    "HPV18": {
-        "label": "HPV18 positive",
-        "type": "Binary (0/1)",
-        "how": "HPV18 infection status.",
-        "meaning": "Associated with glandular lesion risk.",
-        "values": "0 or 1",
-    },
-    "HPV_other_hr": {
-        "label": "Other high-risk HPV",
-        "type": "Binary (0/1)",
-        "how": "Other high-risk HPV types.",
-        "meaning": "Captures high-risk HPV beyond 16/18.",
-        "values": "0 or 1",
-    },
-    "cytology_grade": {
-        "label": "Cytology grade",
-        "type": "Ordinal (0–5)",
-        "how": "0=NILM, 1=ASC-US, 2=ASC-H, 3=LSIL, 4=HSIL, 5=AGC.",
-        "meaning": "Cytology severity grade.",
-        "values": "0–5",
-    },
-    "colpo_impression": {
-        "label": "Colposcopy impression",
-        "type": "Ordinal (0–4)",
-        "how": "0=Normal; 1=Mild; 2=Moderate; 3=Severe; 4=Highly suspicious.",
-        "meaning": "Clinician impression during colposcopy.",
-        "values": "0–4",
-    },
-    "TZ_type": {
-        "label": "Transformation zone (TZ) type",
-        "type": "Ordinal (1–3)",
-        "how": "1=Visible; 2=Partly visible; 3=Not visible.",
-        "meaning": "TZ visibility can affect evaluation and sampling.",
-        "values": "1–3",
-    },
-    "iodine_negative": {
-        "label": "Iodine test negative",
-        "type": "Binary (0/1)",
-        "how": "Schiller test iodine staining negative.",
-        "meaning": "May suggest abnormal epithelium.",
-        "values": "0 or 1",
-    },
-    "atypical_vessels": {
-        "label": "Atypical vessels",
-        "type": "Binary (0/1)",
-        "how": "Presence of atypical vessels.",
-        "meaning": "Can be associated with higher-grade disease.",
-        "values": "0 or 1",
-    },
-    "pathology_fig": {
-        "label": "Pathology fig (routine variable)",
-        "type": "Integer (project-defined)",
-        "how": "Enter as recorded in the dataset.",
-        "meaning": "Treated as a routine input variable.",
-        "values": "0–10 (UI constraint)",
-    },
+    "age": {"label": "Age (years)", "help": "Age at the time of examination."},
+    "menopausal_status": {"label": "Menopausal status", "help": "0 = Premenopausal; 1 = Postmenopausal."},
+    "gravidity": {"label": "Gravidity", "help": "Number of pregnancies (including miscarriage/ectopic)."},
+    "parity": {"label": "Parity", "help": "Number of deliveries (≥28 weeks)."},
+    "child_alive": {"label": "Any living child", "help": "1 = has at least one living child; 0 = none."},
+    "HPV_overall": {"label": "High-risk HPV (overall)", "help": "Overall high-risk HPV status."},
+    "HPV16": {"label": "HPV16 positive", "help": "HPV16 infection status."},
+    "HPV18": {"label": "HPV18 positive", "help": "HPV18 infection status."},
+    "HPV_other_hr": {"label": "Other high-risk HPV", "help": "Other high-risk HPV types."},
+    "cytology_grade": {"label": "Cytology grade", "help": "0–5 ordinal grade."},
+    "colpo_impression": {"label": "Colposcopy impression", "help": "0–4 ordinal impression."},
+    "TZ_type": {"label": "Transformation zone (TZ) type", "help": "1–3 TZ visibility type."},
+    "iodine_negative": {"label": "Iodine test negative", "help": "Schiller iodine staining negative."},
+    "atypical_vessels": {"label": "Atypical vessels", "help": "Presence of atypical vessels."},
+    "pathology_fig": {"label": "Pathology fig (routine variable)", "help": "Enter as recorded in the dataset."},
 }
 
 FEATURE_ORDER = [
     "age", "menopausal_status", "gravidity", "parity",
-    "HPV_overall", "HPV16", "HPV18", "HPV_other_hr",
-    "cytology_grade", "colpo_impression", "TZ_type",
-    "iodine_negative", "atypical_vessels", "child_alive",
-    "pathology_fig",
+    "child_alive", "HPV_overall", "HPV16", "HPV18",
+    "HPV_other_hr", "cytology_grade", "colpo_impression", "TZ_type",
+    "iodine_negative", "atypical_vessels", "pathology_fig",
 ]
-
-
-def help_text(k: str) -> str:
-    v = VAR_DICT[k]
-    return (
-        f"Type: {v['type']}\n\n"
-        f"How to fill: {v['how']}\n\n"
-        f"Clinical meaning: {v['meaning']}\n\n"
-        f"Valid values: {v['values']}"
-    )
 
 
 def safe_float(x, default=None):
@@ -254,11 +192,11 @@ def make_template_csv() -> bytes:
         "menopausal_status": 0,
         "gravidity": 2,
         "parity": 1,
-        "child_alive": 1,
-        "HPV_overall": 1,
+        "child_alive": 0,
+        "HPV_overall": 0,
         "HPV16": 0,
         "HPV18": 0,
-        "HPV_other_hr": 1,
+        "HPV_other_hr": 0,
         "cytology_grade": 3,
         "colpo_impression": 2,
         "TZ_type": 2,
@@ -272,166 +210,83 @@ def make_template_csv() -> bytes:
     return buf.getvalue().encode("utf-8")
 
 
-def render_two_row_summary(rec: dict):
+def render_input_summary_table(rec: dict):
+    # two rows: 8 + 7 columns (total 15)
     row1 = ["age", "menopausal_status", "gravidity", "parity", "child_alive", "HPV_overall", "HPV16", "HPV18"]
     row2 = ["HPV_other_hr", "cytology_grade", "colpo_impression", "TZ_type", "iodine_negative", "atypical_vessels", "pathology_fig"]
 
-    def kv_row(keys):
-        cols = st.columns(len(keys))
-        for col, k in zip(cols, keys):
-            with col:
-                st.markdown(f"<div class='kv-label'>{k}</div>", unsafe_allow_html=True)
-                st.markdown(f"<div class='kv-value'>{rec.get(k, '')}</div>", unsafe_allow_html=True)
-
-    kv_row(row1)
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-    kv_row(row2)
-
-
-# =========================
-# Performance: asset discovery
-# =========================
-def candidate_figure_paths(filename: str):
-    base = Path(PROJ_ROOT)
-    candidates = [
-        str(base / filename),  # project root
-        str(base / "figures" / filename),
-        str(base / "paper_exports" / filename),
-        str(base / "paper_exports" / "figures" / filename),
-        str(base / "paper_exports" / "figs" / filename),
-        str(base / "plots" / filename),
-        str(base / "outputs" / "figures" / filename),
-        str(base / "results" / "figures" / filename),
-        str(base / "webapp" / "assets" / filename),
-    ]
-    return candidates
-
-
-def find_first_existing(paths):
-    for p in paths:
-        if p and os.path.exists(p):
-            return p
-    return None
-
-
-def try_show_figure(title: str, filenames):
-    st.subheader(title)
-    expanded = []
-    for fn in filenames:
-        # allow passing "subdir/file.png"
-        if "/" in fn or "\\" in fn:
-            expanded.append(str(Path(PROJ_ROOT) / fn))
-        expanded.extend(candidate_figure_paths(fn))
-
-    p = find_first_existing(expanded)
-    if p:
-        st.image(p, use_container_width=True)
-    else:
-        st.info("Figure not available.")
-
-
-def try_show_table(title: str, rel_paths):
-    st.subheader(title)
-    expanded = []
-    for rp in rel_paths:
-        expanded.append(str(Path(PROJ_ROOT) / rp))
-        expanded.append(str(Path(PROJ_ROOT) / Path(rp).name))  # filename in root too
-
-    p = find_first_existing(expanded)
-    if p:
-        try:
-            df = pd.read_csv(p)
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        except Exception:
-            st.info("Table found, but cannot be displayed as CSV.")
-    else:
-        st.info("Table not available.")
-
-
-def plot_roc_pr_from_oof():
-    oof_path = Path(PROJ_ROOT) / "oof_calibrated_all_with_mfm.csv"
-    if not oof_path.exists():
-        st.info("OOF file not found: oof_calibrated_all_with_mfm.csv")
-        return
-
-    df = pd.read_csv(oof_path)
-
-    y_candidates = ["y", "label", "Y", "target"]
-    p_candidates = [
-        "p_tab_mfm_sigmoid",
-        "p_tab_sigmoid",
-        "p_tab_mfm_raw",
-        "p_tab",
-        "prob",
-        "risk",
-    ]
-
-    y_col = next((c for c in y_candidates if c in df.columns), None)
-    p_col = next((c for c in p_candidates if c in df.columns), None)
-
-    if y_col is None or p_col is None:
-        st.info("Required columns not found in OOF CSV (need label + probability).")
-        return
-
-    y = df[y_col].astype(int).values
-    p = df[p_col].astype(float).values
-
-    # ROC
-    fpr, tpr, _ = roc_curve(y, p)
-    roc_auc = auc(fpr, tpr)
-
-    fig1 = plt.figure()
-    plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.3f}")
-    plt.plot([0, 1], [0, 1], linestyle="--")
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("True Positive Rate")
-    plt.title(f"ROC curve (OOF) • {p_col}")
-    plt.legend(loc="lower right")
-    st.pyplot(fig1, clear_figure=True)
-
-    # PR
-    prec, rec, _ = precision_recall_curve(y, p)
-    ap = average_precision_score(y, p)
-
-    fig2 = plt.figure()
-    plt.plot(rec, prec, label=f"AP = {ap:.3f}")
-    plt.xlabel("Recall")
-    plt.ylabel("Precision")
-    plt.title(f"Precision–Recall curve (OOF) • {p_col}")
-    plt.legend(loc="lower left")
-    st.pyplot(fig2, clear_figure=True)
-
-
-# =========================
-# Header + Performance toggle
-# =========================
-if "show_performance" not in st.session_state:
-    st.session_state["show_performance"] = False
-
-hdr_left, hdr_right = st.columns([0.78, 0.22], gap="large")
-
-with hdr_left:
-    st.markdown(
+    def cell_html(k):
+        v = rec.get(k, "")
+        return f"""
+        <div class="summary-cell">
+          <div class="summary-k">{k}</div>
+          <div class="summary-v">{v}</div>
+        </div>
         """
+
+    html = '<div class="summary-grid">'
+    html += '<div class="summary-row">' + "".join(cell_html(k) for k in row1) + "</div>"
+    html += '<div class="summary-row row2">' + "".join(cell_html(k) for k in row2) + "</div>"
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def render_ig_only(reasons):
+    """
+    Show IG explanation for the current case.
+    reasons can be:
+      - list[str]
+      - dict with keys like positive/negative or top_features
+      - str
+    """
+    if reasons is None:
+        st.info("No IG explanation was returned by the model.")
+        return
+
+    # list of strings
+    if isinstance(reasons, list):
+        for r in reasons[:12]:
+            st.write(f"- {r}")
+        return
+
+    # dict form
+    if isinstance(reasons, dict):
+        # common pattern: {"positive":[...], "negative":[...]}
+        if "positive" in reasons or "negative" in reasons:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**Factors increasing risk**")
+                for r in (reasons.get("positive") or [])[:10]:
+                    st.write(f"- {r}")
+            with c2:
+                st.markdown("**Factors decreasing risk**")
+                for r in (reasons.get("negative") or [])[:10]:
+                    st.write(f"- {r}")
+            return
+
+        # fallback: show key-value pairs
+        for k, v in list(reasons.items())[:12]:
+            st.write(f"- {k}: {v}")
+        return
+
+    # fallback to string
+    st.write(str(reasons))
+
+
+# =========================
+# Header
+# =========================
+st.markdown(
+    """
 <div class="header">
   <p class="header-title">Cervical Lesion Risk Prediction</p>
   <p class="header-sub">Clinical-style triage dashboard for calibrated risk estimation (research prototype).</p>
 </div>
 """,
-        unsafe_allow_html=True,
-    )
+    unsafe_allow_html=True,
+)
 
-with hdr_right:
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-    if st.button("View performance", use_container_width=True):
-        st.session_state["show_performance"] = not st.session_state["show_performance"]
-
-
-# =========================
-# Main tabs
-# =========================
 tab_single, tab_batch, tab_dictionary = st.tabs(["Single-case", "Batch", "Data Dictionary"])
-
 
 # =========================
 # Sidebar inputs
@@ -439,40 +294,43 @@ tab_single, tab_batch, tab_dictionary = st.tabs(["Single-case", "Batch", "Data D
 with st.sidebar:
     st.subheader("Patient inputs")
 
-    age = st.number_input(VAR_DICT["age"]["label"], min_value=10, max_value=100, value=45, step=1, help=help_text("age"))
+    age = st.number_input(VAR_DICT["age"]["label"], min_value=10, max_value=100, value=45, step=1, help=VAR_DICT["age"]["help"])
+
     menopausal_status = st.selectbox(
         VAR_DICT["menopausal_status"]["label"],
         options=[0, 1],
         format_func=lambda x: "0 = Premenopausal" if x == 0 else "1 = Postmenopausal",
-        help=help_text("menopausal_status"),
+        help=VAR_DICT["menopausal_status"]["help"],
     )
-    gravidity = st.number_input(VAR_DICT["gravidity"]["label"], min_value=0, max_value=30, value=2, step=1, help=help_text("gravidity"))
-    parity = st.number_input(VAR_DICT["parity"]["label"], min_value=0, max_value=20, value=1, step=1, help=help_text("parity"))
+
+    gravidity = st.number_input(VAR_DICT["gravidity"]["label"], min_value=0, max_value=30, value=2, step=1, help=VAR_DICT["gravidity"]["help"])
+    parity = st.number_input(VAR_DICT["parity"]["label"], min_value=0, max_value=20, value=1, step=1, help=VAR_DICT["parity"]["help"])
+
     child_alive = st.selectbox(
         VAR_DICT["child_alive"]["label"],
         options=[0, 1],
         format_func=lambda x: "0 = No" if x == 0 else "1 = Yes",
-        help=help_text("child_alive"),
+        help=VAR_DICT["child_alive"]["help"],
     )
 
     st.divider()
     st.subheader("HPV status")
-    HPV_overall = st.selectbox(VAR_DICT["HPV_overall"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=help_text("HPV_overall"))
-    HPV16 = st.selectbox(VAR_DICT["HPV16"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=help_text("HPV16"))
-    HPV18 = st.selectbox(VAR_DICT["HPV18"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=help_text("HPV18"))
-    HPV_other_hr = st.selectbox(VAR_DICT["HPV_other_hr"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=help_text("HPV_other_hr"))
+    HPV_overall = st.selectbox(VAR_DICT["HPV_overall"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=VAR_DICT["HPV_overall"]["help"])
+    HPV16 = st.selectbox(VAR_DICT["HPV16"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=VAR_DICT["HPV16"]["help"])
+    HPV18 = st.selectbox(VAR_DICT["HPV18"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=VAR_DICT["HPV18"]["help"])
+    HPV_other_hr = st.selectbox(VAR_DICT["HPV_other_hr"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=VAR_DICT["HPV_other_hr"]["help"])
 
     st.divider()
     st.subheader("Cytology and colposcopy")
-    cytology_grade = st.number_input(VAR_DICT["cytology_grade"]["label"], min_value=0, max_value=5, value=3, step=1, help=help_text("cytology_grade"))
-    colpo_impression = st.number_input(VAR_DICT["colpo_impression"]["label"], min_value=0, max_value=4, value=2, step=1, help=help_text("colpo_impression"))
-    TZ_type = st.number_input(VAR_DICT["TZ_type"]["label"], min_value=1, max_value=3, value=2, step=1, help=help_text("TZ_type"))
-    iodine_negative = st.selectbox(VAR_DICT["iodine_negative"]["label"], [0, 1], format_func=lambda x: "0 = No" if x == 0 else "1 = Yes", help=help_text("iodine_negative"))
-    atypical_vessels = st.selectbox(VAR_DICT["atypical_vessels"]["label"], [0, 1], format_func=lambda x: "0 = No" if x == 0 else "1 = Yes", help=help_text("atypical_vessels"))
+    cytology_grade = st.number_input(VAR_DICT["cytology_grade"]["label"], min_value=0, max_value=5, value=3, step=1, help=VAR_DICT["cytology_grade"]["help"])
+    colpo_impression = st.number_input(VAR_DICT["colpo_impression"]["label"], min_value=0, max_value=4, value=2, step=1, help=VAR_DICT["colpo_impression"]["help"])
+    TZ_type = st.number_input(VAR_DICT["TZ_type"]["label"], min_value=1, max_value=3, value=2, step=1, help=VAR_DICT["TZ_type"]["help"])
+    iodine_negative = st.selectbox(VAR_DICT["iodine_negative"]["label"], [0, 1], format_func=lambda x: "0 = No" if x == 0 else "1 = Yes", help=VAR_DICT["iodine_negative"]["help"])
+    atypical_vessels = st.selectbox(VAR_DICT["atypical_vessels"]["label"], [0, 1], format_func=lambda x: "0 = No" if x == 0 else "1 = Yes", help=VAR_DICT["atypical_vessels"]["help"])
 
     st.divider()
     st.subheader("Other")
-    pathology_fig = st.number_input(VAR_DICT["pathology_fig"]["label"], min_value=0, max_value=10, value=2, step=1, help=help_text("pathology_fig"))
+    pathology_fig = st.number_input(VAR_DICT["pathology_fig"]["label"], min_value=0, max_value=10, value=2, step=1, help=VAR_DICT["pathology_fig"]["help"])
 
     st.divider()
     st.subheader("Decision mode")
@@ -490,6 +348,7 @@ with tab_single:
         "menopausal_status": int(menopausal_status),
         "gravidity": int(gravidity),
         "parity": int(parity),
+        "child_alive": int(child_alive),
         "HPV_overall": int(HPV_overall),
         "HPV16": int(HPV16),
         "HPV18": int(HPV18),
@@ -499,15 +358,19 @@ with tab_single:
         "TZ_type": int(TZ_type),
         "iodine_negative": int(iodine_negative),
         "atypical_vessels": int(atypical_vessels),
-        "child_alive": int(child_alive),
         "pathology_fig": int(pathology_fig),
     }
+
+    # keep prediction result in session_state so IG follows Run prediction
+    if "last_pred" not in st.session_state:
+        st.session_state["last_pred"] = None
+        st.session_state["last_pred_record"] = None
 
     left, right = st.columns([1.15, 0.85], gap="large")
 
     with left:
         st.markdown('<div class="card"><div class="card-title">Input summary</div>', unsafe_allow_html=True)
-        render_two_row_summary(record)
+        render_input_summary_table(record)
         st.markdown("</div>", unsafe_allow_html=True)
 
     with right:
@@ -519,6 +382,9 @@ with tab_single:
                     t0 = time.time()
                     out = predict_one(record, mode=mode)
                     dt_ms = (time.time() - t0) * 1000
+
+                    st.session_state["last_pred"] = out
+                    st.session_state["last_pred_record"] = dict(record)
 
                     prob = safe_float(out.get("prob"), None)
                     if prob is None:
@@ -548,23 +414,46 @@ with tab_single:
                     if decision is not None:
                         st.markdown(f"**Decision:** {decision}")
 
-                    reasons = out.get("reasons", None)
-                    if reasons:
-                        st.markdown("**Key contributing factors:**")
-                        if isinstance(reasons, list):
-                            for r in reasons[:6]:
-                                st.write(f"- {r if isinstance(r, str) else json.dumps(r)}")
-                        else:
-                            st.write(str(reasons))
-
                     st.caption(f"Latency: {dt_ms:.0f} ms")
 
                 except Exception:
                     st.error("Unable to compute risk. Please verify model availability and inputs.")
         else:
-            st.info("Enter inputs in the sidebar and click Run prediction.")
+            # show last result if exists
+            if st.session_state["last_pred"] is None:
+                st.info("Enter inputs in the sidebar and click Run prediction.")
+            else:
+                out = st.session_state["last_pred"]
+                prob = safe_float(out.get("prob"), None)
+                if prob is None:
+                    prob = safe_float(out.get("risk"), 0.0)
+                band = risk_band(prob)
+
+                st.markdown(
+                    f"<div class='risk-banner {band_class(band)}'>"
+                    f"<div class='risk-label'>Risk band: {band}</div>"
+                    f"<div class='small-muted'>Calibrated probability: <b>{prob:.3f}</b></div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                st.write(clinical_message(band))
 
         st.markdown("</div>", unsafe_allow_html=True)
+
+    # IG section (ONLY current input, follows Run prediction)
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="card"><div class="card-title">Explainability</div>', unsafe_allow_html=True)
+    st.subheader("Integrated gradients (single-case)")
+
+    if st.session_state["last_pred"] is None:
+        st.info("Run prediction to view IG explanation for the current input case.")
+    else:
+        # Ensure IG shown corresponds to the latest Run prediction
+        out = st.session_state["last_pred"]
+        reasons = out.get("reasons", None)
+        render_ig_only(reasons)
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # =========================
@@ -646,87 +535,10 @@ with tab_dictionary:
     st.markdown('<div class="card"><div class="card-title">Data dictionary</div>', unsafe_allow_html=True)
     rows = []
     for k in FEATURE_ORDER:
-        v = VAR_DICT[k]
         rows.append({
             "Variable": k,
-            "Label": v["label"],
-            "Type": v["type"],
-            "How to fill": v["how"],
-            "Clinical meaning": v["meaning"],
-            "Valid values": v["values"],
+            "Label": VAR_DICT[k]["label"],
+            "Description": VAR_DICT[k]["help"],
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-# =========================
-# Hidden Performance (Version 2)
-# =========================
-if st.session_state["show_performance"]:
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-    st.markdown('<div class="card"><div class="card-title">Performance</div>', unsafe_allow_html=True)
-
-    perf_tab1, perf_tab2, perf_tab3 = st.tabs(["Discrimination", "Calibration & Utility", "Explainability"])
-
-    with perf_tab1:
-        plot_roc_pr_from_oof()
-
-    with perf_tab2:
-        try_show_figure(
-            "Calibration",
-            [
-                "calibration_oof.png",
-                "calibration_compare.png",
-                "calibration_compare_all.png",
-                "reliability.png",
-                "reliability_diagram.png",
-            ],
-        )
-        try_show_figure(
-            "Decision curve analysis",
-            [
-                "dca_oof.png",
-                "dca_all.png",
-                "dca_oof_all.png",
-                "decision_curve.png",
-            ],
-        )
-        try_show_table(
-            "Operating points",
-            [
-                "paper_exports/thresholds_summary.csv",
-                "paper_exports/threshold_report_full.csv",
-                "paper_exports/threshold_report_mfm_sigmoid.csv",
-                "threshold_report_mfm_sigmoid.csv",
-                "threshold_report.csv",
-            ],
-        )
-        try_show_table(
-            "Overall metrics",
-            [
-                "paper_exports/metrics_overall.csv",
-                "paper_exports/metrics_summary.csv",
-                "metrics_summary.csv",
-                "stacking_metrics.csv",
-            ],
-        )
-
-    with perf_tab3:
-        try_show_figure(
-            "Integrated gradients",
-            [
-                "ig_global_top15.png",
-                "figures/ig_global_top15.png",
-                "ig_one_demo_top10.png",
-                "figures/ig_one_demo_top10.png",
-            ],
-        )
-        try_show_figure(
-            "SHAP (XGBoost)",
-            [
-                "shap_xgb_summary.png",
-                "shap_xgb_bar.png",
-            ],
-        )
-
     st.markdown("</div>", unsafe_allow_html=True)
