@@ -3,11 +3,13 @@ import sys
 import time
 import json
 import io
+from pathlib import Path
+
 import streamlit as st
 import pandas as pd
 
 # =========================
-# Backend import (not displayed)
+# Backend import (never displayed)
 # =========================
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJ_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
@@ -33,36 +35,32 @@ st.set_page_config(
 st.markdown(
     """
 <style>
-/* Layout */
-.block-container { padding-top: 1.2rem; padding-bottom: 2.2rem; max-width: 1300px; }
+.block-container { padding-top: 1.1rem; padding-bottom: 2.0rem; max-width: 1320px; }
 section[data-testid="stSidebar"] { border-right: 1px solid rgba(0,0,0,0.06); }
 div[data-testid="stSidebarContent"] { padding-top: 0.6rem; }
 
-/* Typography */
 h1, h2, h3 { letter-spacing: -0.02em; }
 .small-muted { color: rgba(0,0,0,0.60); font-size: 0.92rem; }
 
-/* Header */
-.hdr {
+.header {
   border-radius: 16px;
-  border: 1px solid rgba(0,0,0,.07);
+  border: 1px solid rgba(0,0,0,.08);
   background: linear-gradient(180deg, rgba(248,250,252,1), rgba(241,245,249,1));
-  padding: 1.0rem 1.2rem;
+  padding: 0.95rem 1.15rem;
 }
-.hdr-title { font-size: 1.40rem; font-weight: 780; margin: 0; }
-.hdr-sub { margin: .25rem 0 0; color: rgba(0,0,0,.62); }
+.header-title { font-size: 1.42rem; font-weight: 820; margin: 0; }
+.header-sub { margin: .25rem 0 0; color: rgba(0,0,0,.62); }
 
-/* Cards */
 .card {
   border: 1px solid rgba(0,0,0,.08);
   border-radius: 16px;
   padding: 1rem 1rem;
   background: #ffffff;
 }
-.card-title { font-weight: 760; margin-bottom: .35rem; }
+.card-title { font-weight: 780; margin-bottom: .35rem; }
+
 .hr-soft { height: 1px; background: rgba(0,0,0,.06); margin: .85rem 0; }
 
-/* Risk banner */
 .risk-banner {
   border-radius: 14px;
   padding: .85rem .95rem;
@@ -71,26 +69,24 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .risk-low  { background: rgba(16,185,129,.10); }
 .risk-mid  { background: rgba(245,158,11,.12); }
 .risk-high { background: rgba(239,68,68,.12); }
-.risk-label { font-weight: 820; font-size: 1.05rem; }
+.risk-label { font-weight: 840; font-size: 1.05rem; }
 
-/* Buttons */
+.kv-label { font-size: .82rem; color: rgba(0,0,0,.55); line-height: 1.1; }
+.kv-value { font-size: 1.02rem; font-weight: 720; margin-top: .1rem; }
+
 .stButton>button {
   border-radius: 12px !important;
-  padding: .62rem 1.05rem !important;
-  font-weight: 680 !important;
+  padding: .60rem 1.00rem !important;
+  font-weight: 700 !important;
 }
-
-/* Tabs look more "clinical" */
-button[data-baseweb="tab"] {
-  font-weight: 650;
-}
+button[data-baseweb="tab"] { font-weight: 680; }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
 # =========================
-# Variable dictionary (English, user-facing help)
+# Variable dictionary (English tooltips)
 # =========================
 VAR_DICT = {
     "age": {
@@ -195,7 +191,7 @@ VAR_DICT = {
         "label": "Pathology fig (routine variable)",
         "type": "Integer (project-defined)",
         "how": "Enter as recorded in the dataset.",
-        "meaning": "Used as a routine input variable.",
+        "meaning": "Treated as a routine input variable.",
         "values": "0–10 (UI constraint)",
     },
 }
@@ -240,10 +236,10 @@ def band_class(band: str) -> str:
 
 def clinical_message(band: str) -> str:
     if band == "High":
-        return "Higher risk: consider guideline-based referral for specialist evaluation (research prototype)."
+        return "Higher risk: consider guideline-based specialist evaluation (research prototype)."
     if band == "Intermediate":
-        return "Intermediate risk: consider closer follow-up and guideline-based triage (research prototype)."
-    return "Lower risk: continue routine screening/follow-up per guidelines (research prototype)."
+        return "Intermediate risk: consider closer follow-up and triage (research prototype)."
+    return "Lower risk: continue routine screening/follow-up (research prototype)."
 
 
 def make_template_csv() -> bytes:
@@ -271,21 +267,98 @@ def make_template_csv() -> bytes:
     return buf.getvalue().encode("utf-8")
 
 
+def render_two_row_summary(rec: dict):
+    # Two-row layout: no horizontal scrolling
+    row1 = ["age", "menopausal_status", "gravidity", "parity", "child_alive", "HPV_overall", "HPV16", "HPV18"]
+    row2 = ["HPV_other_hr", "cytology_grade", "colpo_impression", "TZ_type", "iodine_negative", "atypical_vessels", "pathology_fig"]
+
+    def kv_row(keys):
+        cols = st.columns(len(keys))
+        for col, k in zip(cols, keys):
+            with col:
+                st.markdown(f"<div class='kv-label'>{k}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='kv-value'>{rec.get(k, '')}</div>", unsafe_allow_html=True)
+
+    kv_row(row1)
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+    kv_row(row2)
+
+
 # =========================
-# Header
+# Performance asset discovery
 # =========================
-st.markdown(
-    """
-<div class="hdr">
-  <p class="hdr-title">Cervical Lesion Risk Prediction</p>
-  <p class="hdr-sub">Clinical-style dashboard for calibrated risk estimation (research prototype).</p>
+def find_first_existing(paths):
+    for p in paths:
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
+def candidate_figure_paths(filename: str):
+    # common folders in your project (safe: only reads files if exist)
+    base = Path(PROJ_ROOT)
+    candidates = [
+        base / "paper_exports" / "figures" / filename,
+        base / "paper_exports" / "figs" / filename,
+        base / "figures" / filename,
+        base / "plots" / filename,
+        base / "outputs" / "figures" / filename,
+        base / "results" / "figures" / filename,
+        base / "webapp" / "assets" / filename,
+    ]
+    return [str(c) for c in candidates]
+
+
+def try_show_figure(title: str, filenames):
+    st.subheader(title)
+    for fn in filenames:
+        p = find_first_existing(candidate_figure_paths(fn))
+        if p:
+            st.image(p, use_container_width=True)
+            return
+    st.info("Figure not found in the project export folders.")
+
+
+def try_show_table(title: str, rel_paths):
+    st.subheader(title)
+    p = find_first_existing([str(Path(PROJ_ROOT) / rp) for rp in rel_paths])
+    if p:
+        try:
+            df = pd.read_csv(p)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        except Exception:
+            st.info("Table found, but cannot be displayed as CSV.")
+        return
+    st.info("Table not found in the project export folders.")
+
+
+# =========================
+# Header (with performance toggle)
+# =========================
+if "show_performance" not in st.session_state:
+    st.session_state["show_performance"] = False
+
+hdr_left, hdr_right = st.columns([0.78, 0.22], gap="large")
+with hdr_left:
+    st.markdown(
+        """
+<div class="header">
+  <p class="header-title">Cervical Lesion Risk Prediction</p>
+  <p class="header-sub">Clinical-style triage dashboard for calibrated risk estimation (research prototype).</p>
 </div>
 """,
-    unsafe_allow_html=True,
-)
+        unsafe_allow_html=True,
+    )
 
-# No extra "tooltip note" / no extra internal notes
+with hdr_right:
+    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+    if st.button("View performance", use_container_width=True):
+        st.session_state["show_performance"] = not st.session_state["show_performance"]
 
+
+# =========================
+# Main tabs (clinical triage)
+# =========================
 tab_single, tab_batch, tab_dictionary = st.tabs(["Single-case", "Batch", "Data Dictionary"])
 
 
@@ -339,7 +412,7 @@ with st.sidebar:
 
 
 # =========================
-# Single-case tab
+# Single-case tab (Version 1)
 # =========================
 with tab_single:
     record = {
@@ -364,7 +437,7 @@ with tab_single:
 
     with left:
         st.markdown('<div class="card"><div class="card-title">Input summary</div>', unsafe_allow_html=True)
-        st.dataframe(pd.DataFrame([record]), use_container_width=True, hide_index=True)
+        render_two_row_summary(record)
         st.markdown("</div>", unsafe_allow_html=True)
 
     with right:
@@ -386,6 +459,7 @@ with tab_single:
                     mode_out = out.get("mode", mode)
 
                     band = risk_band(prob)
+
                     st.markdown(
                         f"<div class='risk-banner {band_class(band)}'>"
                         f"<div class='risk-label'>Risk band: {band}</div>"
@@ -406,7 +480,7 @@ with tab_single:
 
                     reasons = out.get("reasons", None)
                     if reasons:
-                        st.markdown("**Key contributing factors (summary):**")
+                        st.markdown("**Key contributing factors:**")
                         if isinstance(reasons, list):
                             for r in reasons[:6]:
                                 st.write(f"- {r if isinstance(r, str) else json.dumps(r)}")
@@ -416,7 +490,7 @@ with tab_single:
                     st.caption(f"Latency: {dt_ms:.0f} ms")
 
                 except Exception:
-                    st.error("Unable to compute risk. Please verify the model bundle and inputs.")
+                    st.error("Unable to compute risk. Please verify model availability and inputs.")
         else:
             st.info("Enter inputs in the sidebar and click Run prediction.")
 
@@ -471,7 +545,11 @@ with tab_batch:
                         p = safe_float(pred.get("prob"), None)
                         if p is None:
                             p = safe_float(pred.get("risk"), None)
-                        out_rows.append({"row": i, "probability": p, "risk_band": risk_band(float(p)) if p is not None else "ERROR"})
+                        out_rows.append({
+                            "row": i,
+                            "probability": p,
+                            "risk_band": risk_band(float(p)) if p is not None else "ERROR"
+                        })
                     except Exception:
                         out_rows.append({"row": i, "probability": None, "risk_band": "ERROR"})
 
@@ -508,4 +586,50 @@ with tab_dictionary:
             "Valid values": v["values"],
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# =========================
+# Hidden Performance section (Version 2 evidence)
+# Appears only when user clicks "View performance"
+# =========================
+if st.session_state["show_performance"]:
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="card"><div class="card-title">Performance</div>', unsafe_allow_html=True)
+
+    perf_tab1, perf_tab2, perf_tab3 = st.tabs(["Discrimination", "Calibration & Utility", "Explainability"])
+
+    with perf_tab1:
+        # ROC / PR
+        try_show_figure("ROC curve", ["roc.png", "roc_curve.png", "ROC.png"])
+        try_show_figure("Precision–Recall curve", ["pr.png", "pr_curve.png", "PR.png"])
+
+    with perf_tab2:
+        # Calibration / DCA / thresholds
+        try_show_figure("Calibration curve", ["calibration.png", "calibration_curve.png", "reliability.png"])
+        try_show_figure("Decision curve analysis", ["dca.png", "dca_curve.png", "decision_curve.png"])
+        try_show_table(
+            "Operating points (threshold summary)",
+            [
+                "paper_exports/thresholds_summary.csv",
+                "paper_exports/thresholds.csv",
+                "tables/thresholds_summary.csv",
+                "tables/thresholds.csv",
+            ],
+        )
+        try_show_table(
+            "Overall metrics summary",
+            [
+                "paper_exports/metrics_overall.csv",
+                "paper_exports/metrics_summary.csv",
+                "tables/metrics_overall.csv",
+                "tables/metrics_summary.csv",
+            ],
+        )
+
+    with perf_tab3:
+        # IG global / SHAP summary if exported as images
+        try_show_figure("Integrated gradients (global)", ["ig_global.png", "ig_global_top.png", "ig_bar.png"])
+        try_show_figure("SHAP summary (XGBoost)", ["shap_summary.png", "xgb_shap_summary.png"])
+
     st.markdown("</div>", unsafe_allow_html=True)
