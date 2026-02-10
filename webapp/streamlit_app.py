@@ -7,6 +7,7 @@ from pathlib import Path
 
 import streamlit as st
 import pandas as pd
+import streamlit.components.v1 as components
 
 # =========================
 # Backend import (never displayed)
@@ -211,7 +212,6 @@ def make_template_csv() -> bytes:
 
 
 def render_input_summary_table(rec: dict):
-    # two rows: 8 + 7 columns (total 15)
     row1 = ["age", "menopausal_status", "gravidity", "parity", "child_alive", "HPV_overall", "HPV16", "HPV18"]
     row2 = ["HPV_other_hr", "cytology_grade", "colpo_impression", "TZ_type", "iodine_negative", "atypical_vessels", "pathology_fig"]
 
@@ -224,11 +224,20 @@ def render_input_summary_table(rec: dict):
         </div>
         """
 
-    html = '<div class="summary-grid">'
-    html += '<div class="summary-row">' + "".join(cell_html(k) for k in row1) + "</div>"
-    html += '<div class="summary-row row2">' + "".join(cell_html(k) for k in row2) + "</div>"
-    html += "</div>"
-    st.markdown(html, unsafe_allow_html=True)
+    html = f"""
+    <div class="summary-grid">
+      <div class="summary-row">
+        {''.join(cell_html(k) for k in row1)}
+      </div>
+      <div class="summary-row row2">
+        {''.join(cell_html(k) for k in row2)}
+      </div>
+    </div>
+    """
+
+    #  components.html will always render HTML (not print it as text)
+    components.html(html, height=150, scrolling=False)
+
 
 
 def render_ig_only(reasons):
