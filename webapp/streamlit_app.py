@@ -1,292 +1,13 @@
-import os
-import sys
-import time
-import json
-import io
+# =========================
+# Performance asset discovery + plotting (FULL REPLACEMENT BLOCK)
+# Replace everything from "# Performance asset discovery" to EOF with this block.
+# =========================
 from pathlib import Path
 
-import streamlit as st
-import pandas as pd
-
-# =========================
-# Backend import (never displayed)
-# =========================
-THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJ_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
-if PROJ_ROOT not in sys.path:
-    sys.path.insert(0, PROJ_ROOT)
-
-from final_model.predict_api import predict_one  # backend call only
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc, precision_recall_curve, average_precision_score
 
 
-# =========================
-# Page config
-# =========================
-st.set_page_config(
-    page_title="Clinical Risk Dashboard",
-    page_icon="",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# =========================
-# Hospital-dashboard CSS
-# =========================
-st.markdown(
-    """
-<style>
-.block-container { padding-top: 1.1rem; padding-bottom: 2.0rem; max-width: 1320px; }
-section[data-testid="stSidebar"] { border-right: 1px solid rgba(0,0,0,0.06); }
-div[data-testid="stSidebarContent"] { padding-top: 0.6rem; }
-
-h1, h2, h3 { letter-spacing: -0.02em; }
-.small-muted { color: rgba(0,0,0,0.60); font-size: 0.92rem; }
-
-.header {
-  border-radius: 16px;
-  border: 1px solid rgba(0,0,0,.08);
-  background: linear-gradient(180deg, rgba(248,250,252,1), rgba(241,245,249,1));
-  padding: 0.95rem 1.15rem;
-}
-.header-title { font-size: 1.42rem; font-weight: 820; margin: 0; }
-.header-sub { margin: .25rem 0 0; color: rgba(0,0,0,.62); }
-
-.card {
-  border: 1px solid rgba(0,0,0,.08);
-  border-radius: 16px;
-  padding: 1rem 1rem;
-  background: #ffffff;
-}
-.card-title { font-weight: 780; margin-bottom: .35rem; }
-
-.hr-soft { height: 1px; background: rgba(0,0,0,.06); margin: .85rem 0; }
-
-.risk-banner {
-  border-radius: 14px;
-  padding: .85rem .95rem;
-  border: 1px solid rgba(0,0,0,.08);
-}
-.risk-low  { background: rgba(16,185,129,.10); }
-.risk-mid  { background: rgba(245,158,11,.12); }
-.risk-high { background: rgba(239,68,68,.12); }
-.risk-label { font-weight: 840; font-size: 1.05rem; }
-
-.kv-label { font-size: .82rem; color: rgba(0,0,0,.55); line-height: 1.1; }
-.kv-value { font-size: 1.02rem; font-weight: 720; margin-top: .1rem; }
-
-.stButton>button {
-  border-radius: 12px !important;
-  padding: .60rem 1.00rem !important;
-  font-weight: 700 !important;
-}
-button[data-baseweb="tab"] { font-weight: 680; }
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-# =========================
-# Variable dictionary (English tooltips)
-# =========================
-VAR_DICT = {
-    "age": {
-        "label": "Age (years)",
-        "type": "Integer",
-        "how": "Age at the time of examination.",
-        "meaning": "Older age is generally associated with higher risk.",
-        "values": "10–100 (UI constraint)",
-    },
-    "menopausal_status": {
-        "label": "Menopausal status",
-        "type": "Binary (0/1)",
-        "how": "0 = Premenopausal; 1 = Postmenopausal.",
-        "meaning": "May influence TZ visibility and clinical interpretation.",
-        "values": "0 or 1",
-    },
-    "gravidity": {
-        "label": "Gravidity",
-        "type": "Integer",
-        "how": "Number of pregnancies (including miscarriage/ectopic).",
-        "meaning": "Reproductive history descriptor.",
-        "values": "0+",
-    },
-    "parity": {
-        "label": "Parity",
-        "type": "Integer",
-        "how": "Number of deliveries (≥28 weeks, including stillbirth).",
-        "meaning": "Reproductive history descriptor.",
-        "values": "0+",
-    },
-    "child_alive": {
-        "label": "Any living child",
-        "type": "Binary (0/1)",
-        "how": "1 = has at least one living child; 0 = none.",
-        "meaning": "Reproductive outcome descriptor.",
-        "values": "0 or 1",
-    },
-    "HPV_overall": {
-        "label": "High-risk HPV (overall)",
-        "type": "Binary (0/1)",
-        "how": "Overall high-risk HPV status.",
-        "meaning": "Core clinical predictor.",
-        "values": "0 or 1",
-    },
-    "HPV16": {
-        "label": "HPV16 positive",
-        "type": "Binary (0/1)",
-        "how": "HPV16 infection status.",
-        "meaning": "Associated with higher CIN3+ risk.",
-        "values": "0 or 1",
-    },
-    "HPV18": {
-        "label": "HPV18 positive",
-        "type": "Binary (0/1)",
-        "how": "HPV18 infection status.",
-        "meaning": "Associated with glandular lesion risk.",
-        "values": "0 or 1",
-    },
-    "HPV_other_hr": {
-        "label": "Other high-risk HPV",
-        "type": "Binary (0/1)",
-        "how": "Other high-risk HPV types.",
-        "meaning": "Captures high-risk HPV beyond 16/18.",
-        "values": "0 or 1",
-    },
-    "cytology_grade": {
-        "label": "Cytology grade",
-        "type": "Ordinal (0–5)",
-        "how": "0=NILM, 1=ASC-US, 2=ASC-H, 3=LSIL, 4=HSIL, 5=AGC.",
-        "meaning": "Cytology severity grade.",
-        "values": "0–5",
-    },
-    "colpo_impression": {
-        "label": "Colposcopy impression",
-        "type": "Ordinal (0–4)",
-        "how": "0=Normal; 1=Mild; 2=Moderate; 3=Severe; 4=Highly suspicious.",
-        "meaning": "Clinician impression during colposcopy.",
-        "values": "0–4",
-    },
-    "TZ_type": {
-        "label": "Transformation zone (TZ) type",
-        "type": "Ordinal (1–3)",
-        "how": "1=Visible; 2=Partly visible; 3=Not visible.",
-        "meaning": "TZ visibility can affect evaluation and sampling.",
-        "values": "1–3",
-    },
-    "iodine_negative": {
-        "label": "Iodine test negative",
-        "type": "Binary (0/1)",
-        "how": "Schiller test iodine staining negative.",
-        "meaning": "May suggest abnormal epithelium.",
-        "values": "0 or 1",
-    },
-    "atypical_vessels": {
-        "label": "Atypical vessels",
-        "type": "Binary (0/1)",
-        "how": "Presence of atypical vessels.",
-        "meaning": "Can be associated with higher-grade disease.",
-        "values": "0 or 1",
-    },
-    "pathology_fig": {
-        "label": "Pathology fig (routine variable)",
-        "type": "Integer (project-defined)",
-        "how": "Enter as recorded in the dataset.",
-        "meaning": "Treated as a routine input variable.",
-        "values": "0–10 (UI constraint)",
-    },
-}
-
-FEATURE_ORDER = [
-    "age", "menopausal_status", "gravidity", "parity",
-    "HPV_overall", "HPV16", "HPV18", "HPV_other_hr",
-    "cytology_grade", "colpo_impression", "TZ_type",
-    "iodine_negative", "atypical_vessels", "child_alive",
-    "pathology_fig",
-]
-
-
-def help_text(k: str) -> str:
-    v = VAR_DICT[k]
-    return (
-        f"Type: {v['type']}\n\n"
-        f"How to fill: {v['how']}\n\n"
-        f"Clinical meaning: {v['meaning']}\n\n"
-        f"Valid values: {v['values']}"
-    )
-
-
-def safe_float(x, default=None):
-    try:
-        return float(x)
-    except Exception:
-        return default
-
-
-def risk_band(prob: float) -> str:
-    if prob < 0.10:
-        return "Low"
-    if prob < 0.30:
-        return "Intermediate"
-    return "High"
-
-
-def band_class(band: str) -> str:
-    return {"Low": "risk-low", "Intermediate": "risk-mid", "High": "risk-high"}.get(band, "risk-mid")
-
-
-def clinical_message(band: str) -> str:
-    if band == "High":
-        return "Higher risk: consider guideline-based specialist evaluation (research prototype)."
-    if band == "Intermediate":
-        return "Intermediate risk: consider closer follow-up and triage (research prototype)."
-    return "Lower risk: continue routine screening/follow-up (research prototype)."
-
-
-def make_template_csv() -> bytes:
-    demo = {k: 0 for k in FEATURE_ORDER}
-    demo.update({
-        "age": 45,
-        "menopausal_status": 0,
-        "gravidity": 2,
-        "parity": 1,
-        "child_alive": 1,
-        "HPV_overall": 1,
-        "HPV16": 0,
-        "HPV18": 0,
-        "HPV_other_hr": 1,
-        "cytology_grade": 3,
-        "colpo_impression": 2,
-        "TZ_type": 2,
-        "iodine_negative": 0,
-        "atypical_vessels": 0,
-        "pathology_fig": 2,
-    })
-    df = pd.DataFrame([demo])
-    buf = io.StringIO()
-    df.to_csv(buf, index=False)
-    return buf.getvalue().encode("utf-8")
-
-
-def render_two_row_summary(rec: dict):
-    # Two-row layout: no horizontal scrolling
-    row1 = ["age", "menopausal_status", "gravidity", "parity", "child_alive", "HPV_overall", "HPV16", "HPV18"]
-    row2 = ["HPV_other_hr", "cytology_grade", "colpo_impression", "TZ_type", "iodine_negative", "atypical_vessels", "pathology_fig"]
-
-    def kv_row(keys):
-        cols = st.columns(len(keys))
-        for col, k in zip(cols, keys):
-            with col:
-                st.markdown(f"<div class='kv-label'>{k}</div>", unsafe_allow_html=True)
-                st.markdown(f"<div class='kv-value'>{rec.get(k, '')}</div>", unsafe_allow_html=True)
-
-    kv_row(row1)
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-    kv_row(row2)
-
-
-# =========================
-# Performance asset discovery
-# =========================
 def find_first_existing(paths):
     for p in paths:
         if p and os.path.exists(p):
@@ -295,41 +16,118 @@ def find_first_existing(paths):
 
 
 def candidate_figure_paths(filename: str):
-    # common folders in your project (safe: only reads files if exist)
+    """
+    IMPORTANT:
+    Many exported figures in your project are placed in PROJ_ROOT directly (e.g., calibration_oof.png).
+    So we must include base/filename first.
+    """
     base = Path(PROJ_ROOT)
     candidates = [
-        base / "paper_exports" / "figures" / filename,
-        base / "paper_exports" / "figs" / filename,
-        base / "figures" / filename,
-        base / "plots" / filename,
-        base / "outputs" / "figures" / filename,
-        base / "results" / "figures" / filename,
-        base / "webapp" / "assets" / filename,
+        str(base / filename),  # ✅ project root
+        str(base / "figures" / filename),
+        str(base / "paper_exports" / filename),
+        str(base / "paper_exports" / "figures" / filename),
+        str(base / "paper_exports" / "figs" / filename),
+        str(base / "plots" / filename),
+        str(base / "outputs" / "figures" / filename),
+        str(base / "results" / "figures" / filename),
+        str(base / "webapp" / "assets" / filename),
     ]
-    return [str(c) for c in candidates]
+    return candidates
 
 
 def try_show_figure(title: str, filenames):
     st.subheader(title)
+    # Allow passing "path/filename.png" too
+    expanded = []
     for fn in filenames:
-        p = find_first_existing(candidate_figure_paths(fn))
-        if p:
-            st.image(p, use_container_width=True)
-            return
-    st.info("Figure not found in the project export folders.")
+        if "/" in fn or "\\" in fn:
+            expanded.append(str(Path(PROJ_ROOT) / fn))
+        expanded.extend(candidate_figure_paths(fn))
+
+    p = find_first_existing(expanded)
+    if p:
+        st.image(p, use_container_width=True)
+    else:
+        st.info("Figure not available.")
 
 
 def try_show_table(title: str, rel_paths):
     st.subheader(title)
-    p = find_first_existing([str(Path(PROJ_ROOT) / rp) for rp in rel_paths])
+    expanded = []
+    for rp in rel_paths:
+        expanded.append(str(Path(PROJ_ROOT) / rp))
+        # also allow direct filename in root
+        expanded.append(str(Path(PROJ_ROOT) / Path(rp).name))
+
+    p = find_first_existing(expanded)
     if p:
         try:
             df = pd.read_csv(p)
             st.dataframe(df, use_container_width=True, hide_index=True)
         except Exception:
             st.info("Table found, but cannot be displayed as CSV.")
+    else:
+        st.info("Table not available.")
+
+
+def plot_roc_pr_from_oof():
+    """
+    Computes ROC/PR from OOF predictions rather than relying on exported PNGs.
+    Uses your project's standard OOF file and main probability column.
+    """
+    oof_path = Path(PROJ_ROOT) / "oof_calibrated_all_with_mfm.csv"
+    if not oof_path.exists():
+        st.info("OOF file not found: oof_calibrated_all_with_mfm.csv")
         return
-    st.info("Table not found in the project export folders.")
+
+    df = pd.read_csv(oof_path)
+
+    # Accept a few possible label/prob column names
+    y_candidates = ["y", "label", "Y", "target"]
+    p_candidates = [
+        "p_tab_mfm_sigmoid",  # your paper main
+        "p_tab_sigmoid",
+        "p_tab_mfm_raw",
+        "p_tab",
+        "prob",
+        "risk",
+    ]
+
+    y_col = next((c for c in y_candidates if c in df.columns), None)
+    p_col = next((c for c in p_candidates if c in df.columns), None)
+
+    if y_col is None or p_col is None:
+        st.info("Required columns not found in OOF CSV (need label + probability).")
+        return
+
+    y = df[y_col].astype(int).values
+    p = df[p_col].astype(float).values
+
+    # ROC
+    fpr, tpr, _ = roc_curve(y, p)
+    roc_auc = auc(fpr, tpr)
+
+    fig1 = plt.figure()
+    plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.3f}")
+    plt.plot([0, 1], [0, 1], linestyle="--")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title(f"ROC curve (OOF) • {p_col}")
+    plt.legend(loc="lower right")
+    st.pyplot(fig1, clear_figure=True)
+
+    # PR
+    prec, rec, _ = precision_recall_curve(y, p)
+    ap = average_precision_score(y, p)
+
+    fig2 = plt.figure()
+    plt.plot(rec, prec, label=f"AP = {ap:.3f}")
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.title(f"Precision–Recall curve (OOF) • {p_col}")
+    plt.legend(loc="lower left")
+    st.pyplot(fig2, clear_figure=True)
 
 
 # =========================
@@ -368,7 +166,6 @@ tab_single, tab_batch, tab_dictionary = st.tabs(["Single-case", "Batch", "Data D
 with st.sidebar:
     st.subheader("Patient inputs")
 
-    # Demographics / reproductive
     age = st.number_input(VAR_DICT["age"]["label"], min_value=10, max_value=100, value=45, step=1, help=help_text("age"))
     menopausal_status = st.selectbox(
         VAR_DICT["menopausal_status"]["label"],
@@ -591,7 +388,6 @@ with tab_dictionary:
 
 # =========================
 # Hidden Performance section (Version 2 evidence)
-# Appears only when user clicks "View performance"
 # =========================
 if st.session_state["show_performance"]:
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
@@ -600,36 +396,65 @@ if st.session_state["show_performance"]:
     perf_tab1, perf_tab2, perf_tab3 = st.tabs(["Discrimination", "Calibration & Utility", "Explainability"])
 
     with perf_tab1:
-        # ROC / PR
-        try_show_figure("ROC curve", ["roc.png", "roc_curve.png", "ROC.png"])
-        try_show_figure("Precision–Recall curve", ["pr.png", "pr_curve.png", "PR.png"])
+        plot_roc_pr_from_oof()
 
     with perf_tab2:
-        # Calibration / DCA / thresholds
-        try_show_figure("Calibration curve", ["calibration.png", "calibration_curve.png", "reliability.png"])
-        try_show_figure("Decision curve analysis", ["dca.png", "dca_curve.png", "decision_curve.png"])
+        try_show_figure(
+            "Calibration",
+            [
+                "calibration_oof.png",
+                "calibration_compare.png",
+                "calibration_compare_all.png",
+                "reliability.png",
+                "reliability_diagram.png",
+            ],
+        )
+        try_show_figure(
+            "Decision curve analysis",
+            [
+                "dca_oof.png",
+                "dca_all.png",
+                "dca_oof_all.png",
+                "decision_curve.png",
+            ],
+        )
+
         try_show_table(
-            "Operating points (threshold summary)",
+            "Operating points",
             [
                 "paper_exports/thresholds_summary.csv",
-                "paper_exports/thresholds.csv",
-                "tables/thresholds_summary.csv",
-                "tables/thresholds.csv",
+                "paper_exports/threshold_report_full.csv",
+                "paper_exports/threshold_report_mfm_sigmoid.csv",
+                "threshold_report_mfm_sigmoid.csv",
+                "threshold_report.csv",
             ],
         )
         try_show_table(
-            "Overall metrics summary",
+            "Overall metrics",
             [
                 "paper_exports/metrics_overall.csv",
                 "paper_exports/metrics_summary.csv",
-                "tables/metrics_overall.csv",
-                "tables/metrics_summary.csv",
+                "metrics_summary.csv",
+                "stacking_metrics.csv",
             ],
         )
 
     with perf_tab3:
-        # IG global / SHAP summary if exported as images
-        try_show_figure("Integrated gradients (global)", ["ig_global.png", "ig_global_top.png", "ig_bar.png"])
-        try_show_figure("SHAP summary (XGBoost)", ["shap_summary.png", "xgb_shap_summary.png"])
+        try_show_figure(
+            "Integrated gradients",
+            [
+                "ig_global_top15.png",
+                "figures/ig_global_top15.png",
+                "ig_one_demo_top10.png",
+                "figures/ig_one_demo_top10.png",
+            ],
+        )
+        try_show_figure(
+            "SHAP (XGBoost)",
+            [
+                "shap_xgb_summary.png",
+                "shap_xgb_bar.png",
+            ],
+        )
 
     st.markdown("</div>", unsafe_allow_html=True)
