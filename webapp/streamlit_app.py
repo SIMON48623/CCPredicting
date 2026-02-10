@@ -7,92 +7,104 @@ import streamlit as st
 import pandas as pd
 
 # =========================
-# Project import (backend is NOT displayed in UI)
+# Backend import (not displayed)
 # =========================
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJ_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
 if PROJ_ROOT not in sys.path:
     sys.path.insert(0, PROJ_ROOT)
 
-from final_model.predict_api import predict_one  # backend call; NOT shown on the webpage
+from final_model.predict_api import predict_one  # backend call only
 
 
 # =========================
 # Page config
 # =========================
 st.set_page_config(
-    page_title="Cervix Risk Predictor",
-    page_icon="🧬",
+    page_title="Clinical Risk Dashboard",
+    page_icon="",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 # =========================
-# Global CSS (UI only)
+# Hospital-dashboard CSS
 # =========================
 st.markdown(
     """
 <style>
-.block-container { padding-top: 1.2rem; padding-bottom: 2.5rem; max-width: 1200px; }
-div[data-testid="stSidebar"] { border-right: 1px solid rgba(0,0,0,0.06); }
+/* Layout */
+.block-container { padding-top: 1.2rem; padding-bottom: 2.2rem; max-width: 1300px; }
+section[data-testid="stSidebar"] { border-right: 1px solid rgba(0,0,0,0.06); }
+div[data-testid="stSidebarContent"] { padding-top: 0.6rem; }
+
+/* Typography */
 h1, h2, h3 { letter-spacing: -0.02em; }
+.small-muted { color: rgba(0,0,0,0.60); font-size: 0.92rem; }
 
-.badge {
-  display:inline-block; padding: .25rem .55rem; border-radius: 999px;
-  border: 1px solid rgba(0,0,0,.08); font-size: .82rem;
-  background: rgba(255,255,255,.7);
-}
-.hero {
+/* Header */
+.hdr {
+  border-radius: 16px;
+  border: 1px solid rgba(0,0,0,.07);
+  background: linear-gradient(180deg, rgba(248,250,252,1), rgba(241,245,249,1));
   padding: 1.0rem 1.2rem;
-  border-radius: 18px;
-  background: linear-gradient(135deg, rgba(99,102,241,.12), rgba(16,185,129,.10));
-  border: 1px solid rgba(0,0,0,.06);
 }
-.hero-title { font-size: 1.55rem; font-weight: 760; margin: 0; }
-.hero-sub { margin-top:.35rem; color: rgba(0,0,0,.65); }
+.hdr-title { font-size: 1.40rem; font-weight: 780; margin: 0; }
+.hdr-sub { margin: .25rem 0 0; color: rgba(0,0,0,.62); }
 
+/* Cards */
 .card {
   border: 1px solid rgba(0,0,0,.08);
-  border-radius: 18px;
-  padding: 1rem 1rem;
-  background: rgba(255,255,255,.85);
-}
-.card-title { font-weight: 700; margin-bottom: .35rem; }
-.hr-soft { height: 1px; background: rgba(0,0,0,.06); margin: .8rem 0; }
-
-.risk-banner {
   border-radius: 16px;
-  padding: .9rem 1rem;
+  padding: 1rem 1rem;
+  background: #ffffff;
+}
+.card-title { font-weight: 760; margin-bottom: .35rem; }
+.hr-soft { height: 1px; background: rgba(0,0,0,.06); margin: .85rem 0; }
+
+/* Risk banner */
+.risk-banner {
+  border-radius: 14px;
+  padding: .85rem .95rem;
   border: 1px solid rgba(0,0,0,.08);
 }
-.risk-low { background: rgba(16,185,129,.10); }
-.risk-mid { background: rgba(245,158,11,.12); }
+.risk-low  { background: rgba(16,185,129,.10); }
+.risk-mid  { background: rgba(245,158,11,.12); }
 .risk-high { background: rgba(239,68,68,.12); }
-.risk-label { font-weight: 800; font-size: 1.05rem; }
+.risk-label { font-weight: 820; font-size: 1.05rem; }
 
-.small-muted { color: rgba(0,0,0,0.6); font-size: 0.92rem; }
-.stButton>button { border-radius: 14px !important; padding: .62rem 1.05rem !important; font-weight: 650 !important; }
+/* Buttons */
+.stButton>button {
+  border-radius: 12px !important;
+  padding: .62rem 1.05rem !important;
+  font-weight: 680 !important;
+}
+
+/* Tabs look more "clinical" */
+button[data-baseweb="tab"] {
+  font-weight: 650;
+}
 </style>
 """,
     unsafe_allow_html=True,
 )
 
 # =========================
-# Variable dictionary (from your PDF dictionary; EN phrasing)
+# Variable dictionary (English, user-facing help)
 # =========================
 VAR_DICT = {
     "age": {
         "label": "Age (years)",
         "type": "Integer",
-        "how": "Age at visit/examination.",
-        "meaning": "Older age is associated with higher risk of cervical lesions.",
-        "values": "Integer (years)",
+        "how": "Age at the time of examination.",
+        "meaning": "Older age is generally associated with higher risk.",
+        "values": "10–100 (UI constraint)",
     },
     "menopausal_status": {
         "label": "Menopausal status",
         "type": "Binary (0/1)",
         "how": "0 = Premenopausal; 1 = Postmenopausal.",
-        "meaning": "Postmenopause may shift the transformation zone and affect evaluation.",
+        "meaning": "May influence TZ visibility and clinical interpretation.",
         "values": "0 or 1",
     },
     "gravidity": {
@@ -112,50 +124,50 @@ VAR_DICT = {
     "child_alive": {
         "label": "Any living child",
         "type": "Binary (0/1)",
-        "how": "1 = has ≥1 living child; 0 = none / no delivery.",
-        "meaning": "Delivery outcome information used for research on pregnancy–lesion associations.",
+        "how": "1 = has at least one living child; 0 = none.",
+        "meaning": "Reproductive outcome descriptor.",
         "values": "0 or 1",
     },
     "HPV_overall": {
-        "label": "High-risk HPV positive (overall)",
+        "label": "High-risk HPV (overall)",
         "type": "Binary (0/1)",
         "how": "Overall high-risk HPV status.",
-        "meaning": "Core predictor in the model.",
+        "meaning": "Core clinical predictor.",
         "values": "0 or 1",
     },
     "HPV16": {
         "label": "HPV16 positive",
         "type": "Binary (0/1)",
         "how": "HPV16 infection status.",
-        "meaning": "HPV16 is associated with the highest CIN3+ risk.",
+        "meaning": "Associated with higher CIN3+ risk.",
         "values": "0 or 1",
     },
     "HPV18": {
         "label": "HPV18 positive",
         "type": "Binary (0/1)",
         "how": "HPV18 infection status.",
-        "meaning": "HPV18 is more strongly associated with adenocarcinoma-related lesions.",
+        "meaning": "Associated with glandular lesion risk.",
         "values": "0 or 1",
     },
     "HPV_other_hr": {
-        "label": "Other high-risk HPV positive",
+        "label": "Other high-risk HPV",
         "type": "Binary (0/1)",
         "how": "Other high-risk HPV types.",
-        "meaning": "High-risk HPV positivity beyond HPV16/18.",
+        "meaning": "Captures high-risk HPV beyond 16/18.",
         "values": "0 or 1",
     },
     "cytology_grade": {
         "label": "Cytology grade",
-        "type": "Ordinal integer (0–5)",
+        "type": "Ordinal (0–5)",
         "how": "0=NILM, 1=ASC-US, 2=ASC-H, 3=LSIL, 4=HSIL, 5=AGC.",
-        "meaning": "Cytology severity grade used as a key clinical predictor.",
+        "meaning": "Cytology severity grade.",
         "values": "0–5",
     },
     "colpo_impression": {
         "label": "Colposcopy impression",
-        "type": "Ordinal integer (0–4)",
-        "how": "0=Normal; 1=Mild suspicion; 2=Moderate; 3=Severe; 4=Highly suspicious for CIN3+.",
-        "meaning": "Clinician’s impression during colposcopy.",
+        "type": "Ordinal (0–4)",
+        "how": "0=Normal; 1=Mild; 2=Moderate; 3=Severe; 4=Highly suspicious.",
+        "meaning": "Clinician impression during colposcopy.",
         "values": "0–4",
     },
     "TZ_type": {
@@ -169,23 +181,22 @@ VAR_DICT = {
         "label": "Iodine test negative",
         "type": "Binary (0/1)",
         "how": "Schiller test iodine staining negative.",
-        "meaning": "Negative staining may suggest abnormal epithelium.",
+        "meaning": "May suggest abnormal epithelium.",
         "values": "0 or 1",
     },
     "atypical_vessels": {
         "label": "Atypical vessels",
         "type": "Binary (0/1)",
-        "how": "Presence of atypical vessels on colposcopy.",
-        "meaning": "May be associated with higher-grade disease.",
+        "how": "Presence of atypical vessels.",
+        "meaning": "Can be associated with higher-grade disease.",
         "values": "0 or 1",
     },
-    # Project rule: pathology_fig is a normal predictor; NOT used to construct y (label source is pathology_group).
     "pathology_fig": {
-        "label": "Pathology fig (ordinary clinical variable)",
+        "label": "Pathology fig (routine variable)",
         "type": "Integer (project-defined)",
         "how": "Enter as recorded in the dataset.",
-        "meaning": "Treated as a routine clinical variable and NOT used to construct the label.",
-        "values": "Project-defined (UI allows 0–10)",
+        "meaning": "Used as a routine input variable.",
+        "values": "0–10 (UI constraint)",
     },
 }
 
@@ -197,14 +208,23 @@ FEATURE_ORDER = [
     "pathology_fig",
 ]
 
+
 def help_text(k: str) -> str:
     v = VAR_DICT[k]
     return (
         f"Type: {v['type']}\n\n"
         f"How to fill: {v['how']}\n\n"
-        f"Meaning: {v['meaning']}\n\n"
+        f"Clinical meaning: {v['meaning']}\n\n"
         f"Valid values: {v['values']}"
     )
+
+
+def safe_float(x, default=None):
+    try:
+        return float(x)
+    except Exception:
+        return default
+
 
 def risk_band(prob: float) -> str:
     if prob < 0.10:
@@ -213,30 +233,18 @@ def risk_band(prob: float) -> str:
         return "Intermediate"
     return "High"
 
+
 def band_class(band: str) -> str:
     return {"Low": "risk-low", "Intermediate": "risk-mid", "High": "risk-high"}.get(band, "risk-mid")
 
-def band_guidance(band: str) -> str:
+
+def clinical_message(band: str) -> str:
     if band == "High":
-        return "Higher risk: consider guideline-based referral for specialist evaluation/colposcopy (research demo)."
+        return "Higher risk: consider guideline-based referral for specialist evaluation (research prototype)."
     if band == "Intermediate":
-        return "Intermediate risk: consider closer follow-up and guideline-based triage (research demo)."
-    return "Lower risk: continue routine screening/follow-up per guidelines (research demo)."
+        return "Intermediate risk: consider closer follow-up and guideline-based triage (research prototype)."
+    return "Lower risk: continue routine screening/follow-up per guidelines (research prototype)."
 
-def mode_explain(mode: str) -> str:
-    if mode == "triage":
-        return "High-sensitivity triage: prioritizes fewer missed cases (more positive alerts)."
-    if mode == "youden":
-        return "Youden operating point: balances sensitivity and specificity."
-    if mode == "screen":
-        return "Screening-oriented mode (project-defined thresholding)."
-    return ""
-
-def safe_float(x, default=None):
-    try:
-        return float(x)
-    except Exception:
-        return default
 
 def make_template_csv() -> bytes:
     demo = {k: 0 for k in FEATURE_ORDER}
@@ -268,33 +276,24 @@ def make_template_csv() -> bytes:
 # =========================
 st.markdown(
     """
-<div class="hero">
-  <div class="badge">🧬 Calibrated Risk • Research Prototype</div>
-  <p class="hero-title">Cervical Lesion Risk Prediction</p>
-  <p class="hero-sub">Structured inputs → calibrated risk probability + decision mode output (not for clinical diagnosis).</p>
+<div class="hdr">
+  <p class="hdr-title">Cervical Lesion Risk Prediction</p>
+  <p class="hdr-sub">Clinical-style dashboard for calibrated risk estimation (research prototype).</p>
 </div>
 """,
     unsafe_allow_html=True,
 )
 
-with st.expander("⚠️ Disclaimer (click to expand)", expanded=False):
-    st.markdown(
-        """
-- **Research prototype. Not for clinical diagnosis.**
-- Developed on a single-center retrospective dataset; external validation is required before any clinical use.
-- Do not enter personally identifiable information.
-"""
-    )
+# No extra "tooltip note" / no extra internal notes
 
-tab_single, tab_batch, tab_dict = st.tabs(["👤 Single-case", "📦 Batch", "📚 Data Dictionary"])
+tab_single, tab_batch, tab_dictionary = st.tabs(["Single-case", "Batch", "Data Dictionary"])
 
 
 # =========================
 # Sidebar: Inputs
 # =========================
 with st.sidebar:
-    st.header("Inputs")
-    st.caption("Each field includes a tooltip explanation (ⓘ).")
+    st.subheader("Patient inputs")
 
     # Demographics / reproductive
     age = st.number_input(VAR_DICT["age"]["label"], min_value=10, max_value=100, value=45, step=1, help=help_text("age"))
@@ -314,14 +313,14 @@ with st.sidebar:
     )
 
     st.divider()
-    st.subheader("HPV")
+    st.subheader("HPV status")
     HPV_overall = st.selectbox(VAR_DICT["HPV_overall"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=help_text("HPV_overall"))
     HPV16 = st.selectbox(VAR_DICT["HPV16"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=help_text("HPV16"))
     HPV18 = st.selectbox(VAR_DICT["HPV18"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=help_text("HPV18"))
     HPV_other_hr = st.selectbox(VAR_DICT["HPV_other_hr"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive", help=help_text("HPV_other_hr"))
 
     st.divider()
-    st.subheader("Cytology / Colposcopy")
+    st.subheader("Cytology and colposcopy")
     cytology_grade = st.number_input(VAR_DICT["cytology_grade"]["label"], min_value=0, max_value=5, value=3, step=1, help=help_text("cytology_grade"))
     colpo_impression = st.number_input(VAR_DICT["colpo_impression"]["label"], min_value=0, max_value=4, value=2, step=1, help=help_text("colpo_impression"))
     TZ_type = st.number_input(VAR_DICT["TZ_type"]["label"], min_value=1, max_value=3, value=2, step=1, help=help_text("TZ_type"))
@@ -335,9 +334,8 @@ with st.sidebar:
     st.divider()
     st.subheader("Decision mode")
     mode = st.selectbox("Mode", options=["triage", "youden", "screen"], index=0)
-    st.caption(mode_explain(mode))
 
-    run_btn = st.button("🚀 Predict", type="primary", use_container_width=True)
+    run_btn = st.button("Run prediction", type="primary", use_container_width=True)
 
 
 # =========================
@@ -362,31 +360,23 @@ with tab_single:
         "pathology_fig": int(pathology_fig),
     }
 
-    c1, c2 = st.columns([1.2, 0.8], gap="large")
+    left, right = st.columns([1.15, 0.85], gap="large")
 
-    with c1:
+    with left:
         st.markdown('<div class="card"><div class="card-title">Input summary</div>', unsafe_allow_html=True)
         st.dataframe(pd.DataFrame([record]), use_container_width=True, hide_index=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown('<div class="card"><div class="card-title">Notes</div>', unsafe_allow_html=True)
-        st.markdown(
-            "- `pathology_group` is the label source and is **not** an input feature.\n"
-            "- This UI does **not** display any backend code or raw JSON outputs.",
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with c2:
-        st.markdown('<div class="card"><div class="card-title">Prediction</div>', unsafe_allow_html=True)
+    with right:
+        st.markdown('<div class="card"><div class="card-title">Risk assessment</div>', unsafe_allow_html=True)
 
         if run_btn:
-            with st.spinner("Running inference..."):
+            with st.spinner("Computing risk..."):
                 try:
                     t0 = time.time()
                     out = predict_one(record, mode=mode)
                     dt_ms = (time.time() - t0) * 1000
 
-                    # Robust parsing (different backends may name keys differently)
                     prob = safe_float(out.get("prob"), None)
                     if prob is None:
                         prob = safe_float(out.get("risk"), 0.0)
@@ -394,7 +384,6 @@ with tab_single:
                     decision = out.get("decision", None)
                     thr = safe_float(out.get("threshold"), None)
                     mode_out = out.get("mode", mode)
-                    reasons = out.get("reasons", None)
 
                     band = risk_band(prob)
                     st.markdown(
@@ -404,7 +393,7 @@ with tab_single:
                         f"</div>",
                         unsafe_allow_html=True,
                     )
-                    st.write(band_guidance(band))
+                    st.write(clinical_message(band))
                     st.markdown("<div class='hr-soft'></div>", unsafe_allow_html=True)
 
                     m1, m2, m3 = st.columns(3)
@@ -415,20 +404,21 @@ with tab_single:
                     if decision is not None:
                         st.markdown(f"**Decision:** {decision}")
 
+                    reasons = out.get("reasons", None)
                     if reasons:
-                        st.markdown("**Explanation (summary):**")
+                        st.markdown("**Key contributing factors (summary):**")
                         if isinstance(reasons, list):
-                            for r in reasons[:8]:
-                                st.write(f"• {r if isinstance(r, str) else json.dumps(r)}")
+                            for r in reasons[:6]:
+                                st.write(f"- {r if isinstance(r, str) else json.dumps(r)}")
                         else:
                             st.write(str(reasons))
 
-                    st.caption(f"Response time: {dt_ms:.0f} ms")
+                    st.caption(f"Latency: {dt_ms:.0f} ms")
 
                 except Exception:
-                    st.error("Inference failed. Please check that the model bundle is available and inputs are valid.")
+                    st.error("Unable to compute risk. Please verify the model bundle and inputs.")
         else:
-            st.info("Fill the inputs on the left and click **Predict**.")
+            st.info("Enter inputs in the sidebar and click Run prediction.")
 
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -438,10 +428,10 @@ with tab_single:
 # =========================
 with tab_batch:
     st.markdown('<div class="card"><div class="card-title">Batch prediction</div>', unsafe_allow_html=True)
-    st.write("Upload a CSV with the required columns. The app will run inference row-by-row.")
+    st.write("Upload a CSV containing the required columns. Predictions are computed row-by-row.")
 
     st.download_button(
-        "⬇️ Download CSV template",
+        "Download CSV template",
         data=make_template_csv(),
         file_name="cervix_modelA_template.csv",
         mime="text/csv",
@@ -457,7 +447,8 @@ with tab_batch:
             st.error(f"Missing required columns: {missing}")
         else:
             st.success(f"Loaded {len(df)} rows.")
-            run_batch = st.button("▶️ Run batch prediction", type="primary")
+            run_batch = st.button("Run batch prediction", type="primary")
+
             if run_batch:
                 out_rows = []
                 prog = st.progress(0)
@@ -466,7 +457,6 @@ with tab_batch:
                 for i, row in df.iterrows():
                     rec = {}
                     for k in FEATURE_ORDER:
-                        # best-effort numeric casting
                         val = row[k]
                         if pd.isna(val):
                             rec[k] = 0
@@ -481,9 +471,9 @@ with tab_batch:
                         p = safe_float(pred.get("prob"), None)
                         if p is None:
                             p = safe_float(pred.get("risk"), None)
-                        out_rows.append({"row": i, "prob": p, "band": risk_band(float(p)) if p is not None else "ERROR"})
+                        out_rows.append({"row": i, "probability": p, "risk_band": risk_band(float(p)) if p is not None else "ERROR"})
                     except Exception:
-                        out_rows.append({"row": i, "prob": None, "band": "ERROR"})
+                        out_rows.append({"row": i, "probability": None, "risk_band": "ERROR"})
 
                     prog.progress(int((i + 1) / max(n, 1) * 100))
 
@@ -491,7 +481,7 @@ with tab_batch:
                 st.dataframe(out_df, use_container_width=True, hide_index=True)
 
                 st.download_button(
-                    "⬇️ Download results CSV",
+                    "Download results CSV",
                     data=out_df.to_csv(index=False).encode("utf-8"),
                     file_name="batch_predictions.csv",
                     mime="text/csv",
@@ -504,10 +494,8 @@ with tab_batch:
 # =========================
 # Dictionary tab
 # =========================
-with tab_dict:
-    st.markdown('<div class="card"><div class="card-title">Variable Dictionary</div>', unsafe_allow_html=True)
-    st.write("User-facing descriptions for each input variable.")
-
+with tab_dictionary:
+    st.markdown('<div class="card"><div class="card-title">Data dictionary</div>', unsafe_allow_html=True)
     rows = []
     for k in FEATURE_ORDER:
         v = VAR_DICT[k]
@@ -516,10 +504,8 @@ with tab_dict:
             "Label": v["label"],
             "Type": v["type"],
             "How to fill": v["how"],
-            "Meaning": v["meaning"],
+            "Clinical meaning": v["meaning"],
             "Valid values": v["values"],
         })
-
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    st.caption("Note: pathology_group is the label source and is intentionally NOT an input feature.")
     st.markdown("</div>", unsafe_allow_html=True)
