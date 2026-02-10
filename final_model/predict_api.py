@@ -5,6 +5,7 @@ import joblib
 import torch
 import torch.nn as nn
 
+
 class TabTokTransformer(nn.Module):
     """
     MUST match the exported architecture in 18_export_final_tabmfm_model.py,
@@ -37,17 +38,17 @@ class TabTokTransformer(nn.Module):
             nn.Linear(self.d_model, 1)
         )
 
-        # ---- recon heads (for MFM pretrain), required for loading state_dict ----
+        # ---- recon heads (required for loading state_dict) ----
         self.num_recon = nn.Linear(self.d_model, 1)
         self.cat_recon = nn.ModuleList([nn.Linear(self.d_model, int(card)) for card in cat_cards])
 
     def forward_tokens(self, x_num, x_cat):
         B = x_num.size(0)
-        num_tok = self.num_value_proj(x_num.unsqueeze(-1))
+        num_tok = self.num_value_proj(x_num.unsqueeze(-1))  # (B, n_num, d)
         if self.n_cat > 0:
             cat_toks = [emb(x_cat[:, j]) for j, emb in enumerate(self.cat_embs)]
-            cat_tok = torch.stack(cat_toks, dim=1)
-            tok = torch.cat([num_tok, cat_tok], dim=1)
+            cat_tok = torch.stack(cat_toks, dim=1)          # (B, n_cat, d)
+            tok = torch.cat([num_tok, cat_tok], dim=1)      # (B, F, d)
         else:
             tok = num_tok
 
@@ -61,7 +62,12 @@ class TabTokTransformer(nn.Module):
         pooled = h.mean(dim=1)
         return self.cls_head(pooled).squeeze(-1)
 
+
 class CervixRiskPredictor:
+    # IG steps kept modest for web latency
+    IG_STEPS = 24
+    IG_TOPK = 10
+
     def __init__(self, model_dir=None, device=None):
         base = os.path.dirname(os.path.abspath(__file__))
         self.model_dir = model_dir or base
@@ -84,10 +90,13 @@ class CervixRiskPredictor:
         ).to(self.device)
 
         state_path = os.path.join(self.model_dir, "transformer_state.pt")
-        # weights_only=True removes the security warning and is appropriate for state_dict
         state = torch.load(state_path, map_location=self.device, weights_only=True)
         self.model.load_state_dict(state, strict=True)
         self.model.eval()
+
+        self.num_cols = list(self.preprocess["num_cols"])
+        self.cat_cols = list(self.preprocess["cat_cols"])
+        self.feature_names = self.num_cols + self.cat_cols
 
     def _vectorize_one(self, record: dict):
         feat = self.preprocess["feature_cols"]
@@ -122,8 +131,51 @@ class CervixRiskPredictor:
 
         return x_num[None, :], x_cat[None, :]
 
+    def _logit_from_tokens(self, tok):
+        h = self.model.encoder(tok)
+        pooled = h.mean(dim=1)
+        return self.model.cls_head(pooled).squeeze(-1)  # (B,)
+
+    def _ig_single(self, x_num_t, x_cat_t, steps=24):
+        """
+        Integrated Gradients on token embeddings, single case.
+        Returns token attribution per feature (signed + abs).
+        """
+        # baseline: zeros (num) + UNK=0 (cat)
+        base_num = torch.zeros_like(x_num_t)
+        base_cat = torch.zeros_like(x_cat_t)
+
+        with torch.no_grad():
+            tok_in = self.model.forward_tokens(x_num_t, x_cat_t)      # (1, F, d)
+            tok_base = self.model.forward_tokens(base_num, base_cat)  # (1, F, d)
+
+        grads_acc = torch.zeros_like(tok_in)
+
+        for i in range(1, steps + 1):
+            alpha = i / steps
+            tok = tok_base + alpha * (tok_in - tok_base)
+            tok.requires_grad_(True)
+
+            logit = self._logit_from_tokens(tok)  # (1,)
+            self.model.zero_grad(set_to_none=True)
+            logit.backward()
+            grads_acc += tok.grad.detach()
+
+        avg_grads = grads_acc / steps
+        ig = (tok_in - tok_base) * avg_grads  # (1, F, d)
+
+        # signed + abs scores per token
+        tok_signed = ig.sum(dim=-1).detach().cpu().numpy().reshape(-1)
+        tok_abs = ig.abs().sum(dim=-1).detach().cpu().numpy().reshape(-1)
+
+        # normalize by abs sum
+        denom = float(tok_abs.sum() + 1e-12)
+        tok_norm = tok_abs / denom
+
+        return tok_signed, tok_abs, tok_norm
+
     @torch.no_grad()
-    def predict_one(self, record: dict, mode="triage"):
+    def predict_one(self, record: dict, mode="triage", explain=True):
         x_num, x_cat = self._vectorize_one(record)
         x_num_t = torch.tensor(x_num, dtype=torch.float32, device=self.device)
         x_cat_t = torch.tensor(x_cat, dtype=torch.long, device=self.device)
@@ -139,7 +191,7 @@ class CervixRiskPredictor:
         pt = float(thr[mode])
         label = "positive" if p_cal >= pt else "negative"
 
-        return {
+        out = {
             "prob_raw": p_raw,
             "prob": p_cal,
             "decision_mode": mode,
@@ -152,9 +204,43 @@ class CervixRiskPredictor:
             }
         }
 
+        # ---- Single-case IG (Transformer-only) ----
+        if explain:
+            # Need grads: temporarily enable grad
+            torch.set_grad_enabled(True)
+            try:
+                tok_signed, tok_abs, tok_norm = self._ig_single(x_num_t, x_cat_t, steps=int(self.IG_STEPS))
+
+                # top-k by normalized abs attribution
+                idx = np.argsort(-tok_norm)[: int(self.IG_TOPK)]
+
+                pos_list = []
+                neg_list = []
+                for j in idx:
+                    name = self.feature_names[j] if j < len(self.feature_names) else f"f{j}"
+                    pct = tok_norm[j] * 100.0
+                    sgn = tok_signed[j]
+
+                    item = f"{name}: {pct:.1f}%"
+                    if sgn >= 0:
+                        pos_list.append(item)
+                    else:
+                        neg_list.append(item)
+
+                out["ig"] = {
+                    "positive": pos_list,
+                    "negative": neg_list,
+                }
+            finally:
+                torch.set_grad_enabled(False)
+
+        return out
+
+
 _predictor = None
+
 def predict_one(record: dict, mode="triage"):
     global _predictor
     if _predictor is None:
         _predictor = CervixRiskPredictor()
-    return _predictor.predict_one(record, mode=mode)
+    return _predictor.predict_one(record, mode=mode, explain=True)
