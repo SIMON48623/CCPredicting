@@ -1,23 +1,22 @@
 import os
 import sys
 import time
-import json
 import io
-from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 
 # -------------------------
-# Paths & imports
+# Paths & backend import
 # -------------------------
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJ_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
 if PROJ_ROOT not in sys.path:
     sys.path.insert(0, PROJ_ROOT)
 
-from final_model.predict_api import predict_one
+from final_model.predict_api import predict_one  # noqa: E402
+
 
 # -------------------------
 # Page
@@ -30,7 +29,7 @@ st.set_page_config(
 )
 
 # -------------------------
-# Hospital-dashboard CSS
+# CSS
 # -------------------------
 st.markdown(
     """
@@ -74,7 +73,7 @@ div[data-testid="stSidebarContent"] { padding-top: 0.6rem; }
   font-weight: 700 !important;
 }
 
-/* ---- table-like input summary ---- */
+/* ---- Input summary table grid ---- */
 .summary-grid {
   border: 1px solid rgba(0,0,0,.08);
   border-radius: 14px;
@@ -126,6 +125,34 @@ div[data-testid="stSidebarContent"] { padding-top: 0.6rem; }
 )
 
 # -------------------------
+# Variable dictionary (EN)
+# -------------------------
+VAR_DICT = {
+    "age": {"label": "Age (years)", "desc": "Age at the time of examination."},
+    "menopausal_status": {"label": "Menopausal status", "desc": "0 = Premenopausal; 1 = Postmenopausal."},
+    "gravidity": {"label": "Gravidity", "desc": "Number of pregnancies (including miscarriage/ectopic)."},
+    "parity": {"label": "Parity", "desc": "Number of deliveries (≥28 weeks)."},
+    "child_alive": {"label": "Any living child", "desc": "1 = has at least one living child; 0 = none."},
+    "HPV_overall": {"label": "High-risk HPV (overall)", "desc": "Overall high-risk HPV status."},
+    "HPV16": {"label": "HPV16 positive", "desc": "HPV16 infection status."},
+    "HPV18": {"label": "HPV18 positive", "desc": "HPV18 infection status."},
+    "HPV_other_hr": {"label": "Other high-risk HPV", "desc": "Other high-risk HPV types."},
+    "cytology_grade": {"label": "Cytology grade", "desc": "0–5 ordinal grade."},
+    "colpo_impression": {"label": "Colposcopy impression", "desc": "0–4 ordinal impression."},
+    "TZ_type": {"label": "Transformation zone (TZ) type", "desc": "1–3 TZ visibility type."},
+    "iodine_negative": {"label": "Iodine test negative", "desc": "Schiller iodine staining negative."},
+    "atypical_vessels": {"label": "Atypical vessels", "desc": "Presence of atypical vessels."},
+    "pathology_fig": {"label": "Pathology fig (routine variable)", "desc": "Treated as a routine input variable."},
+}
+
+FEATURE_ORDER = [
+    "age", "menopausal_status", "gravidity", "parity",
+    "child_alive", "HPV_overall", "HPV16", "HPV18",
+    "HPV_other_hr", "cytology_grade", "colpo_impression", "TZ_type",
+    "iodine_negative", "atypical_vessels", "pathology_fig",
+]
+
+# -------------------------
 # Helpers
 # -------------------------
 def safe_float(x, default=None):
@@ -152,6 +179,7 @@ def clinical_message(band: str) -> str:
     return "Lower risk: continue routine screening/follow-up (research prototype)."
 
 def render_input_summary_table(rec: dict):
+    # two rows: 8 + 7 columns
     row1 = ["age", "menopausal_status", "gravidity", "parity", "child_alive", "HPV_overall", "HPV16", "HPV18"]
     row2 = ["HPV_other_hr", "cytology_grade", "colpo_impression", "TZ_type", "iodine_negative", "atypical_vessels", "pathology_fig"]
 
@@ -174,16 +202,18 @@ def render_input_summary_table(rec: dict):
       </div>
     </div>
     """
-    # ✅ This prevents HTML being shown as raw text
+
+    # ✅ Force HTML rendering (prevents showing raw <div> as text)
     components.html(html, height=150, scrolling=False)
 
 def make_template_csv() -> bytes:
-    demo = {
+    demo = {k: 0 for k in FEATURE_ORDER}
+    demo.update({
         "age": 45, "menopausal_status": 0, "gravidity": 2, "parity": 1, "child_alive": 0,
         "HPV_overall": 0, "HPV16": 0, "HPV18": 0, "HPV_other_hr": 0,
         "cytology_grade": 3, "colpo_impression": 2, "TZ_type": 2,
         "iodine_negative": 0, "atypical_vessels": 0, "pathology_fig": 2
-    }
+    })
     df = pd.DataFrame([demo])
     buf = io.StringIO()
     df.to_csv(buf, index=False)
@@ -210,6 +240,7 @@ def render_ig_payload(ig):
         return
     st.write(str(ig))
 
+
 # -------------------------
 # Header
 # -------------------------
@@ -223,7 +254,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-tab_single, tab_batch = st.tabs(["Single-case", "Batch"])
+tab_single, tab_batch, tab_dict = st.tabs(["Single-case", "Batch", "Data Dictionary"])
 
 # -------------------------
 # Sidebar inputs
@@ -231,44 +262,43 @@ tab_single, tab_batch = st.tabs(["Single-case", "Batch"])
 with st.sidebar:
     st.subheader("Patient inputs")
 
-    age = st.number_input("Age (years)", min_value=10, max_value=100, value=45, step=1)
-    menopausal_status = st.selectbox("Menopausal status", options=[0, 1],
-                                     format_func=lambda x: "0 = Premenopausal" if x == 0 else "1 = Postmenopausal")
-    gravidity = st.number_input("Gravidity", min_value=0, max_value=30, value=2, step=1)
-    parity = st.number_input("Parity", min_value=0, max_value=20, value=1, step=1)
-    child_alive = st.selectbox("Any living child", options=[0, 1],
-                               format_func=lambda x: "0 = No" if x == 0 else "1 = Yes")
+    age = st.number_input(VAR_DICT["age"]["label"], min_value=10, max_value=100, value=45, step=1)
+    menopausal_status = st.selectbox(
+        VAR_DICT["menopausal_status"]["label"], options=[0, 1],
+        format_func=lambda x: "0 = Premenopausal" if x == 0 else "1 = Postmenopausal"
+    )
+    gravidity = st.number_input(VAR_DICT["gravidity"]["label"], min_value=0, max_value=30, value=2, step=1)
+    parity = st.number_input(VAR_DICT["parity"]["label"], min_value=0, max_value=20, value=1, step=1)
+    child_alive = st.selectbox(
+        VAR_DICT["child_alive"]["label"], options=[0, 1],
+        format_func=lambda x: "0 = No" if x == 0 else "1 = Yes"
+    )
 
     st.divider()
     st.subheader("HPV status")
-    HPV_overall = st.selectbox("High-risk HPV (overall)", [0, 1],
-                               format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive")
-    HPV16 = st.selectbox("HPV16 positive", [0, 1],
-                         format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive")
-    HPV18 = st.selectbox("HPV18 positive", [0, 1],
-                         format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive")
-    HPV_other_hr = st.selectbox("Other high-risk HPV", [0, 1],
-                                format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive")
+    HPV_overall = st.selectbox(VAR_DICT["HPV_overall"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive")
+    HPV16 = st.selectbox(VAR_DICT["HPV16"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive")
+    HPV18 = st.selectbox(VAR_DICT["HPV18"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive")
+    HPV_other_hr = st.selectbox(VAR_DICT["HPV_other_hr"]["label"], [0, 1], format_func=lambda x: "0 = Negative" if x == 0 else "1 = Positive")
 
     st.divider()
     st.subheader("Cytology and colposcopy")
-    cytology_grade = st.number_input("Cytology grade (0–5)", min_value=0, max_value=5, value=3, step=1)
-    colpo_impression = st.number_input("Colposcopy impression (0–4)", min_value=0, max_value=4, value=2, step=1)
-    TZ_type = st.number_input("TZ type (1–3)", min_value=1, max_value=3, value=2, step=1)
-    iodine_negative = st.selectbox("Iodine test negative", [0, 1],
-                                   format_func=lambda x: "0 = No" if x == 0 else "1 = Yes")
-    atypical_vessels = st.selectbox("Atypical vessels", [0, 1],
-                                    format_func=lambda x: "0 = No" if x == 0 else "1 = Yes")
+    cytology_grade = st.number_input(VAR_DICT["cytology_grade"]["label"], min_value=0, max_value=5, value=3, step=1)
+    colpo_impression = st.number_input(VAR_DICT["colpo_impression"]["label"], min_value=0, max_value=4, value=2, step=1)
+    TZ_type = st.number_input(VAR_DICT["TZ_type"]["label"], min_value=1, max_value=3, value=2, step=1)
+    iodine_negative = st.selectbox(VAR_DICT["iodine_negative"]["label"], [0, 1], format_func=lambda x: "0 = No" if x == 0 else "1 = Yes")
+    atypical_vessels = st.selectbox(VAR_DICT["atypical_vessels"]["label"], [0, 1], format_func=lambda x: "0 = No" if x == 0 else "1 = Yes")
 
     st.divider()
     st.subheader("Other")
-    pathology_fig = st.number_input("Pathology fig (routine variable)", min_value=0, max_value=10, value=2, step=1)
+    pathology_fig = st.number_input(VAR_DICT["pathology_fig"]["label"], min_value=0, max_value=10, value=2, step=1)
 
     st.divider()
     st.subheader("Decision mode")
     mode = st.selectbox("Mode", options=["triage", "youden", "screen"], index=0)
 
     run_btn = st.button("Run prediction", type="primary", use_container_width=True)
+
 
 # -------------------------
 # Single-case
@@ -361,7 +391,6 @@ with tab_single:
 
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # ---- Explainability: IG only, follows Run prediction ----
     st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
     st.markdown('<div class="card"><div class="card-title">Explainability</div>', unsafe_allow_html=True)
     st.subheader("Integrated gradients (single-case)")
@@ -369,10 +398,10 @@ with tab_single:
     if st.session_state["last_pred"] is None:
         st.info("Run prediction to view IG explanation for the current input case.")
     else:
-        ig = st.session_state["last_pred"].get("ig", None)
-        render_ig_payload(ig)
+        render_ig_payload(st.session_state["last_pred"].get("ig", None))
 
     st.markdown("</div>", unsafe_allow_html=True)
+
 
 # -------------------------
 # Batch
@@ -391,13 +420,7 @@ with tab_batch:
     uploaded = st.file_uploader("Upload CSV", type=["csv"])
     if uploaded is not None:
         df = pd.read_csv(uploaded)
-        required = [
-            "age","menopausal_status","gravidity","parity","child_alive",
-            "HPV_overall","HPV16","HPV18","HPV_other_hr",
-            "cytology_grade","colpo_impression","TZ_type",
-            "iodine_negative","atypical_vessels","pathology_fig"
-        ]
-        missing = [c for c in required if c not in df.columns]
+        missing = [c for c in FEATURE_ORDER if c not in df.columns]
         if missing:
             st.error(f"Missing required columns: {missing}")
         else:
@@ -408,7 +431,7 @@ with tab_batch:
                 prog = st.progress(0)
                 n = len(df)
                 for i, row in df.iterrows():
-                    rec = {k: (0 if pd.isna(row[k]) else int(row[k])) for k in required}
+                    rec = {k: (0 if pd.isna(row[k]) else int(row[k])) for k in FEATURE_ORDER}
                     try:
                         pred = predict_one(rec, mode=mode)
                         p = safe_float(pred.get("prob"), None)
@@ -427,4 +450,20 @@ with tab_batch:
                     use_container_width=True,
                 )
 
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# -------------------------
+# Data Dictionary
+# -------------------------
+with tab_dict:
+    st.markdown('<div class="card"><div class="card-title">Data dictionary</div>', unsafe_allow_html=True)
+    rows = []
+    for k in FEATURE_ORDER:
+        rows.append({
+            "Variable": k,
+            "Label": VAR_DICT[k]["label"],
+            "Description": VAR_DICT[k]["desc"],
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     st.markdown("</div>", unsafe_allow_html=True)
