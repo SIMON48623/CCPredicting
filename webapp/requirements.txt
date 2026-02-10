@@ -2,6 +2,8 @@ streamlit
 pandas
 numpy
 scikit-learn
+matplotlib
+xgboost
+shap
 joblib
-torch
-openpyxl
+scipy
