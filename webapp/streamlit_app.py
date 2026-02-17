@@ -255,14 +255,7 @@ if run:
     # Keep the numeric metric as well (optional but useful)
     st.metric(label="Calibrated risk (probability)", value=f"{p:.4f}", delta=f"{band} band")
 
-    st.write(
-        {
-            "label": pred.get("label"),
-            "decision_mode": pred.get("decision_mode"),
-            "threshold": pred.get("threshold"),
-            "prob_raw": pred.get("prob_raw"),
-        }
-    )
+   
 
     # 2) Single-case IG
     st.subheader("Integrated Gradients (single case)")
