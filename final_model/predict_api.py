@@ -4,6 +4,10 @@ import numpy as np
 import joblib
 import torch
 import torch.nn as nn
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import io
 
 class TabTokTransformer(nn.Module):
     """
@@ -58,6 +62,12 @@ class TabTokTransformer(nn.Module):
 
     def classify_logits(self, x_num, x_cat):
         h = self.encoder(self.forward_tokens(x_num, x_cat))
+        pooled = h.mean(dim=1)
+        return self.cls_head(pooled).squeeze(-1)
+
+    def classify_logits_from_tokens(self, tok):
+        """tok: (B, n_features, d_model)"""
+        h = self.encoder(tok)
         pooled = h.mean(dim=1)
         return self.cls_head(pooled).squeeze(-1)
 
@@ -122,6 +132,9 @@ class CervixRiskPredictor:
 
         return x_num[None, :], x_cat[None, :]
 
+    def _feature_names(self):
+        return list(self.preprocess["num_cols"]) + list(self.preprocess["cat_cols"])
+
     @torch.no_grad()
     def predict_one(self, record: dict, mode="triage"):
         x_num, x_cat = self._vectorize_one(record)
@@ -152,9 +165,115 @@ class CervixRiskPredictor:
             }
         }
 
+    def explain_one_ig(self, record: dict, steps: int = 48):
+        """Single-case Integrated Gradients on token embeddings.
+
+        Returns:
+            dict: {
+              "feature_names": [...],
+              "attributions": [...],  # signed, same length
+              "prob": float,
+              "prob_raw": float
+            }
+        """
+        self.model.eval()
+
+        # ---- input tensors ----
+        x_num, x_cat = self._vectorize_one(record)
+        x_num_t = torch.tensor(x_num, dtype=torch.float32, device=self.device)
+        x_cat_t = torch.tensor(x_cat, dtype=torch.long, device=self.device)
+
+        # ---- baseline: numeric zeros (i.e., standardized mean), categorical UNK index 0 ----
+        x_num0 = torch.zeros_like(x_num_t)
+        x_cat0 = torch.zeros_like(x_cat_t)
+
+        with torch.no_grad():
+            tok_in = self.model.forward_tokens(x_num_t, x_cat_t)   # (1,F,D)
+            tok_0  = self.model.forward_tokens(x_num0, x_cat0)
+
+        delta = tok_in - tok_0
+
+        # ---- IG accumulate gradients along the path ----
+        steps = int(max(8, steps))
+        alphas = torch.linspace(0.0, 1.0, steps, device=self.device)
+        grad_sum = torch.zeros_like(tok_in)
+
+        for a in alphas:
+            tok = tok_0 + a * delta
+            tok_leaf = tok.detach().clone().requires_grad_(True)
+
+            logit = self.model.classify_logits_from_tokens(tok_leaf)  # (1,)
+            self.model.zero_grad(set_to_none=True)
+            if tok_leaf.grad is not None:
+                tok_leaf.grad.zero_()
+            logit.sum().backward()
+            grad = tok_leaf.grad
+            if grad is None:
+                raise RuntimeError("IG failed: token gradient is None. Please check requires_grad leaf handling.")
+            grad_sum += grad.detach()
+
+        avg_grad = grad_sum / float(steps)
+        ig_tok = (delta * avg_grad).squeeze(0)  # (F,D)
+
+        # Reduce D -> scalar attribution per feature (signed)
+        ig_feat = ig_tok.sum(dim=1).detach().cpu().numpy().astype(np.float32)
+
+        # Also return probs for reference
+        with torch.no_grad():
+            logit0 = float(self.model.classify_logits(x_num_t, x_cat_t).item())
+        p_raw = float(1.0 / (1.0 + np.exp(-logit0)))
+        p_cal = float(self.calibrator.predict_proba(np.array([[p_raw]], dtype=np.float32))[:, 1][0])
+
+        return {
+            "feature_names": self._feature_names(),
+            "attributions": ig_feat.tolist(),
+            "prob_raw": p_raw,
+            "prob": p_cal,
+        }
+
+    def explain_one_ig_png(self, record: dict, steps: int = 48, top_k: int = 10):
+        """Return (png_bytes, table_df) for single-case IG."""
+        out = self.explain_one_ig(record, steps=steps)
+        names = out["feature_names"]
+        attrs = np.asarray(out["attributions"], dtype=np.float32)
+
+        # Rank by absolute magnitude
+        k = int(max(1, min(len(attrs), top_k)))
+        idx = np.argsort(-np.abs(attrs))[:k]
+        sel_names = [names[i] for i in idx][::-1]
+        sel_attrs = attrs[idx][::-1]
+
+        fig = plt.figure(figsize=(7.2, 4.2))
+        ax = fig.add_subplot(111)
+        y = np.arange(len(sel_names))
+        ax.barh(y, sel_attrs)
+        ax.set_yticks(y)
+        ax.set_yticklabels(sel_names)
+        ax.set_xlabel("Integrated Gradients (signed)")
+        ax.set_title("Single-case IG (top features)")
+        ax.axvline(0.0, linewidth=1)
+        fig.tight_layout()
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=160)
+        plt.close(fig)
+        buf.seek(0)
+
+        # lightweight table as list of dicts (avoid pandas dependency in backend)
+        table = [{"feature": names[i], "ig": float(attrs[i])} for i in idx]
+        return buf.getvalue(), table, out
+
 _predictor = None
 def predict_one(record: dict, mode="triage"):
     global _predictor
     if _predictor is None:
         _predictor = CervixRiskPredictor()
     return _predictor.predict_one(record, mode=mode)
+
+
+def explain_one_ig_png(record: dict, steps: int = 48, top_k: int = 10):
+    """Public helper for the webapp."""
+    global _predictor
+    if _predictor is None:
+        _predictor = CervixRiskPredictor()
+    return _predictor.explain_one_ig_png(record, steps=steps, top_k=top_k)

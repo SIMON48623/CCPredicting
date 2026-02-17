@@ -29,3 +29,30 @@ __pycache__/
 Thumbs.db
 .vscode/
 .idea/
+# data / raw
+data/
+*.xlsx
+*.csv
+*.parquet
+
+# notebooks / experiments
+notebooks/
+*.ipynb
+runs/
+logs/
+reports/
+results/
+figures/
+tables/
+
+# caches
+__pycache__/
+*.pyc
+
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+.DS_Store
