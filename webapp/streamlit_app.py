@@ -15,10 +15,46 @@ from final_model.predict_api import predict_one, explain_one_ig_png
 
 st.set_page_config(page_title="Cervix Risk Predictor", layout="wide")
 
+# -------------------------
+# Small CSS helpers (cards)
+# -------------------------
+st.markdown(
+    """
+    <style>
+    .result-card {
+        border-radius: 14px;
+        padding: 16px 18px;
+        margin: 8px 0 14px 0;
+        border: 1px solid rgba(0,0,0,0.08);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .result-positive {
+        background: rgba(255, 0, 0, 0.08);
+        border-color: rgba(255, 0, 0, 0.25);
+    }
+    .result-negative {
+        background: rgba(0, 160, 0, 0.08);
+        border-color: rgba(0, 160, 0, 0.25);
+    }
+    .result-title {
+        font-size: 18px;
+        font-weight: 700;
+        margin: 0 0 6px 0;
+    }
+    .result-sub {
+        font-size: 14px;
+        margin: 0;
+        opacity: 0.9;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # -------------------------
 # Variable dictionary (from your uploaded PDF)
 # -------------------------
+# NOTE: per your request, pathology_fig is enforced as binary 0/1 in the UI below.
 VAR_DICT = [
     {"variable": "age", "type": "int (years)", "meaning": "Age at visit/exam; higher age generally increases risk."},
     {"variable": "menopausal_status", "type": "0/1", "meaning": "0=pre-menopause, 1=post-menopause; post-menopause may affect TZ visibility and diagnosis."},
@@ -34,7 +70,7 @@ VAR_DICT = [
     {"variable": "TZ_type", "type": "int (1/2/3)", "meaning": "Transformation zone type: 1=visible, 2=partly visible, 3=not visible."},
     {"variable": "iodine_negative", "type": "0/1", "meaning": "Iodine test negative (abnormal uptake)."},
     {"variable": "atypical_vessels", "type": "0/1", "meaning": "Presence of atypical vessels on colposcopy."},
-    {"variable": "pathology_fig", "type": "int (0–10)", "meaning": "Clinician imaging score used in the dataset (project-specific)."},
+    {"variable": "pathology_fig", "type": "0/1", "meaning": "Binary imaging/clinical flag (0=No, 1=Yes). Enforced as 0/1 in this app UI."},
 ]
 
 VAR_LOOKUP = {d["variable"]: d for d in VAR_DICT}
@@ -53,6 +89,20 @@ def risk_band(p: float) -> str:
     if p < 0.30:
         return "Intermediate"
     return "High"
+
+
+MODE_HELP = (
+    "**triage**: prioritizes sensitivity (lower threshold) to avoid missing high-risk cases; may produce more false positives.\n\n"
+    "**screen**: balanced screening mode (moderate threshold), aiming for a practical trade-off between sensitivity and specificity.\n\n"
+    "**youden**: uses the Youden-optimal threshold that maximizes (Sensitivity + Specificity − 1) on the validation set."
+)
+
+IG_HELP = (
+    "Integrated Gradients (IG) approximates an integral of gradients from a baseline input to the current sample.\n\n"
+    "• Higher steps → smoother/more stable attributions but slower.\n"
+    "• Lower steps → faster but potentially noisier.\n\n"
+    "Typical online values: 20–50. Use ~100 if you prefer maximum stability."
+)
 
 
 # -------------------------
@@ -112,8 +162,12 @@ with st.sidebar:
 
     st.divider()
     st.subheader("Cytology / Colposcopy")
-    cytology_grade = st.number_input("cytology_grade", min_value=0, max_value=5, value=3, step=1, help=_help("cytology_grade"))
-    colpo_impression = st.number_input("colpo_impression", min_value=0, max_value=4, value=2, step=1, help=_help("colpo_impression"))
+    cytology_grade = st.number_input(
+        "cytology_grade", min_value=0, max_value=5, value=3, step=1, help=_help("cytology_grade")
+    )
+    colpo_impression = st.number_input(
+        "colpo_impression", min_value=0, max_value=4, value=2, step=1, help=_help("colpo_impression")
+    )
     TZ_type = st.number_input("TZ_type", min_value=1, max_value=3, value=2, step=1, help=_help("TZ_type"))
     iodine_negative = st.selectbox(
         "iodine_negative",
@@ -131,11 +185,17 @@ with st.sidebar:
     )
 
     st.divider()
-    pathology_fig = st.number_input("pathology_fig", min_value=0, max_value=10, value=2, step=1, help=_help("pathology_fig"))
+    pathology_fig = st.selectbox(
+        "pathology_fig",
+        options=[0, 1],
+        index=0,
+        format_func=lambda x: "0 (No)" if x == 0 else "1 (Yes)",
+        help=_help("pathology_fig"),
+    )
 
     st.divider()
-    mode = st.selectbox("Decision mode", options=["triage", "screen", "youden"], index=0)
-    ig_steps = st.slider("IG steps", min_value=16, max_value=96, value=48, step=8)
+    mode = st.selectbox("Decision mode", options=["triage", "screen", "youden"], index=0, help=MODE_HELP)
+    ig_steps = st.slider("IG steps", min_value=16, max_value=96, value=48, step=8, help=IG_HELP)
     run = st.button("Predict", type="primary")
 
 
@@ -167,17 +227,40 @@ if run:
     pred = predict_one(record, mode=mode)
     png_bytes, ig_table, ig_meta = explain_one_ig_png(record, steps=int(ig_steps), top_k=10)
 
-    # 1) Prediction result
+    # 1) Prediction result (with red/green card)
     st.subheader("Prediction result")
     p = float(pred["prob"])
     band = risk_band(p)
+
+    # Normalize label to decide color (robust to "1"/1/"positive"/"Positive"/etc.)
+    raw_label = pred.get("label", "")
+    label_str = str(raw_label).strip().lower()
+    is_positive = label_str in {"1", "pos", "positive", "true", "yes"}
+
+    card_class = "result-positive" if is_positive else "result-negative"
+    card_title = "POSITIVE (High-grade lesion suspected)" if is_positive else "NEGATIVE (Low risk)"
+    st.markdown(
+        f"""
+        <div class="result-card {card_class}">
+            <p class="result-title">{card_title}</p>
+            <p class="result-sub">
+                Calibrated risk: <b>{p:.4f}</b> &nbsp; | &nbsp; Risk band: <b>{band}</b> &nbsp; | &nbsp;
+                Mode: <b>{pred.get("decision_mode", mode)}</b> &nbsp; | &nbsp; Threshold: <b>{pred.get("threshold")}</b>
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Keep the numeric metric as well (optional but useful)
     st.metric(label="Calibrated risk (probability)", value=f"{p:.4f}", delta=f"{band} band")
+
     st.write(
         {
-            "label": pred["label"],
-            "decision_mode": pred["decision_mode"],
-            "threshold": pred["threshold"],
-            "prob_raw": pred["prob_raw"],
+            "label": pred.get("label"),
+            "decision_mode": pred.get("decision_mode"),
+            "threshold": pred.get("threshold"),
+            "prob_raw": pred.get("prob_raw"),
         }
     )
 
