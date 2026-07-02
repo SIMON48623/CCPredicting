@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ccpredicting"
+version = "0.2.0"
+description = "Tabular deep learning and Streamlit deployment for cervical high-grade lesion risk prediction."
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+where = ["src"]

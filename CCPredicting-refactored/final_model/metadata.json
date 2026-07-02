@@ -1,0 +1,14 @@
+{
+  "model_name": "tab_mfm_transformer",
+  "calibration": "platt_sigmoid",
+  "thresholds": {
+    "screen": 0.12,
+    "triage": 0.28,
+    "youden": 0.33
+  },
+  "train": {
+    "do_pretrain": true,
+    "mask_ratio": 0.15,
+    "use_col_id_emb": true
+  }
+}

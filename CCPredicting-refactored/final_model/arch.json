@@ -1,0 +1,19 @@
+{
+  "d_model": 64,
+  "n_head": 4,
+  "n_layers": 2,
+  "d_ff": 128,
+  "dropout": 0.15,
+  "use_col_id_emb": true,
+  "cat_cards": [
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4
+  ],
+  "n_num": 7
+}

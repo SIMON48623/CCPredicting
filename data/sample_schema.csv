@@ -1,0 +1,16 @@
+variable,type,allowed_values,required,model_feature,public_alias,description
+age,integer,10-100,yes,age,,Age at index visit/exam
+menopausal_status,binary,0/1,yes,menopausal_status,,0=pre-menopause; 1=post-menopause
+gravidity,integer,0-30,yes,gravidity,,Number of pregnancies
+parity,integer,0-20,yes,parity,,Number of deliveries
+child_alive,binary,0/1,yes,child_alive,,1=at least one living child; 0=none
+HPV_overall,binary,0/1,yes,HPV_overall,,Overall high-risk HPV positivity
+HPV16,binary,0/1,yes,HPV16,,HPV16 status
+HPV18,binary,0/1,yes,HPV18,,HPV18 status
+HPV_other_hr,binary,0/1,yes,HPV_other_hr,,Other high-risk HPV types
+cytology_grade,integer,0-5,yes,cytology_grade,,0=NILM; 1=ASC-US; 2=ASC-H; 3=LSIL; 4=HSIL; 5=AGC
+colpo_impression,integer,0-4,yes,colpo_impression,,0=normal; 1=mild; 2=moderate; 3=severe; 4=highly suspicious for CIN3+
+TZ_type,integer,1/2/3,yes,TZ_type,,Transformation-zone type
+iodine_negative,binary,0/1,yes,iodine_negative,,Iodine test negativity
+atypical_vessels,binary,0/1,yes,atypical_vessels,,Presence of atypical vessels
+clinician_image_assessment,binary,0/1,yes,pathology_fig,clinician_image_assessment,Clinician-recorded image/colposcopy-derived assessment; not the histopathology outcome label
