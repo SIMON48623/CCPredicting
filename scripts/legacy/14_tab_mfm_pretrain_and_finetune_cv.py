@@ -20,8 +20,8 @@ from torch.utils.data import Dataset, DataLoader
 # =======================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-DEFAULT_XLSX = r"C:\Users\COMPUTER\Desktop\CCPredicting\cervix_modelA\data_modelA终.xlsx"
-LOCAL_XLSX = os.path.join(BASE_DIR, "data_modelA终.xlsx")
+DEFAULT_XLSX = os.getenv("CCPREDICTING_DATA_PATH", os.path.join(BASE_DIR, "data", "raw", "data_modelA.xlsx"))
+LOCAL_XLSX = os.path.join(BASE_DIR, "data", "raw", "data_modelA.xlsx")
 XLSX_PATH = LOCAL_XLSX if os.path.exists(LOCAL_XLSX) else DEFAULT_XLSX
 
 SHEET_NAME = "data_modelA(1)"

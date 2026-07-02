@@ -1,7 +1,8 @@
+import os
 import pandas as pd
 import numpy as np
 
-XLSX_PATH = r"C:\Users\COMPUTER\Desktop\CCPredicting\cervix_modelA\data_modelA终.xlsx"
+XLSX_PATH = os.getenv("CCPREDICTING_DATA_PATH", "data/raw/data_modelA.xlsx")
 SHEET_NAME = "data_modelA(1)"   # 你截图里就是这个
 
 # ====== 你最终允许的特征列（严格按你最初 Step3，不含 pathology_fig）======

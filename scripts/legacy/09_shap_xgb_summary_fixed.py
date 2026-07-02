@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 # =========================
 # 1) 配置：路径 + 列
 # =========================
-XLSX_PATH = r"C:\Users\COMPUTER\Desktop\CCPredicting\cervix_modelA\data_modelA终.xlsx"
+XLSX_PATH = os.getenv("CCPREDICTING_DATA_PATH", "data/raw/data_modelA.xlsx")
 SHEET_NAME = "data_modelA(1)"  # 你之前打印出来的 sheet 名
 
 # 你当前项目的严格 drop（防泄露 + 无意义 ID/姓名）

@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
@@ -7,7 +8,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 
 # === 1) 读入 + 与之前一致的清洗/构造 X,y ===
-xlsx_path = r"C:\Users\COMPUTER\Desktop\CCPredicting\cervix_modelA\data_modelA终.xlsx"
+xlsx_path = os.getenv("CCPREDICTING_DATA_PATH", "data/raw/data_modelA.xlsx")
 df = pd.read_excel(xlsx_path, sheet_name="data_modelA(1)")
 
 for c in ["age", "gravidity", "parity"]:

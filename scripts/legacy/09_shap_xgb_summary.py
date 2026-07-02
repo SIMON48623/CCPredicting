@@ -13,7 +13,7 @@ import shap
 # =======================
 # CONFIG (你只需要改这里)
 # =======================
-XLSX_PATH = r"C:\Users\COMPUTER\Desktop\CCPredicting\cervix_modelA\data_modelA终.xlsx"
+XLSX_PATH = os.getenv("CCPREDICTING_DATA_PATH", "data/raw/data_modelA.xlsx")
 SHEET_NAME = None  # None=默认第一张；如果要指定，写 "data_modelA(1)" 之类
 OUT_DIR = r"C:\Users\COMPUTER\Desktop\CCPredicting\cervix_modelA"
 

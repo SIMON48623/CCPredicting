@@ -30,7 +30,7 @@ from xgboost import XGBClassifier
 # =======================
 BASE_DIR = os.path.dirname(__file__)
 
-XLSX_PATH  = r"C:\Users\COMPUTER\Desktop\CCPredicting\cervix_modelA\data_modelA终.xlsx"
+XLSX_PATH  = os.getenv("CCPREDICTING_DATA_PATH", "data/raw/data_modelA.xlsx")
 SHEET_NAME = "data_modelA(1)"
 RANDOM_SEED = 42
 N_SPLITS = 5

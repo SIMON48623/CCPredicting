@@ -1,58 +1,45 @@
-
-# generated results / potential sensitive outputs
-oof_*.csv
-tab_*.csv
-subgroup_*.csv
-threshold_*.csv
-threshold_*.txt
-tables/*.csv
-tables/*.docx
-figures/*.png
-# === PRIVATE / patient-level data ===
-PRIVATE_DO_NOT_UPLOAD/
-*.xlsx
-*.xls
-
-# patient-level predictions / outputs
-oof*.csv
-*oof*.csv
-*patient*.csv
-*demo*.csv
-ig_one_demo*.csv
-
-# === python cache ===
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+.pytest_cache/
 
-# === OS / IDE ===
+# OS / IDE
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
-# data / raw
-data/
-*.xlsx
-*.csv
-*.parquet
 
-# notebooks / experiments
-notebooks/
-*.ipynb
+# Private clinical data: do not commit
+PRIVATE_DO_NOT_UPLOAD/
+data/raw/
+*.xlsx
+*.xls
+*.parquet
+*.feather
+
+# Patient-level outputs / temporary local experiments
+*patient*.csv
+*demo*.csv
+*oof*.csv
 runs/
 logs/
-reports/
 results/
-figures/
-tables/
+local_outputs/
 
-# caches
-__pycache__/
-*.pyc
+# Model/cache files created locally during experimentation
+*.joblib
+*.pkl
+*.pt
+*.pth
+*.ckpt
+!final_model/*.pkl
+!final_model/*.pt
+!final_model/*.json
+!final_model/*.py
+!final_model/README.md
 
-
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.ipynb_checkpoints/
-.DS_Store
+# Generated reports can be regenerated from legacy scripts
+# Keep curated files only when intentionally committed.

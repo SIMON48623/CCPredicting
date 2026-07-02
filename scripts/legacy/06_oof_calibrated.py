@@ -1,4 +1,5 @@
 # SAVE: YES (OOF calibrated probabilities with fold-wise fitting)
+import os
 
 import numpy as np
 import pandas as pd
@@ -18,7 +19,7 @@ from xgboost import XGBClassifier
 # ---------------------------
 # 0) Load + build X,y
 # ---------------------------
-xlsx_path = r"C:\Users\COMPUTER\Desktop\CCPredicting\cervix_modelA\data_modelA终.xlsx"
+xlsx_path = os.getenv("CCPREDICTING_DATA_PATH", "data/raw/data_modelA.xlsx")
 df = pd.read_excel(xlsx_path, sheet_name="data_modelA(1)")
 
 for c in ["age", "gravidity", "parity"]:
